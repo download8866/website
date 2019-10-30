@@ -47,16 +47,23 @@
                 <div class="col-md-10 offset-md-1 main">
             	    <div class="row">
             	      <div class="col-md-8">
-                        <h4 class="text-muted" style="padding-top:35px; font-weight: bold;">
-				Build, share and collaborate on services from anywhere
-			</h4>
+                        <h2 class="text-muted" style="padding-top:35px; font-weight: bold;">
+				Build, share and collaborate on services
+				<br>From anywhere, with anyone
+			</h2>
                         <p class="col-md-11" style="font-size: calc(1em + 0.5vw); padding: 10px 0 25px 0;">
-			  Cloud computing now gives us unlimited scale, however leveraging it with existing tools is still difficult. 
-			  Micro empowers you to build services in the cloud and beyond with a global services network.
+			  Micro is an open global services network which empowers you to develop microservices in the cloud and beyond 
+			  without the hassle of managing infrastructure.
                         </p>
 			<p><b>Micro</b> is built with a <b>developer first focus</b>.</p>
+			<div style="font-size: 0.9em; padding: 5px 5px 5px 0;">
+			  Select your OS:
+			  <a href="#install-mac" id="install-mac">mac</a>
+			  <a href="#install-linux" id="install-linux">linux</a>
+			  <a href="#install-windows" id="install-windows">windows</a>
+			</div>
 			<div style="display:inline-block; max-width: 100%;" class="rounded install">
-                          <pre id=install style="margin:0; display:inline-block; vertical-align: middle; max-width: 100%;">$ curl -fsSL https://micro.mu/install.sh | /bin/bash</pre>
+                          <pre id=install style="margin:0; display:inline-block; vertical-align: middle; max-width: 100%;">curl -fsSL https://micro.mu/install.sh | /bin/bash</pre>
 			</div>
 			<p id="copied">&nbsp;</p>
 		        <p class="pull-left"><a href="#platform" class="oss btn btn-light btn-lg">Learn more</a></p>
@@ -283,6 +290,24 @@ $(".install").click(function(e) {
 
     return false;
 });
+
+$("#install-mac").click(function(e) {
+	var el = document.getElementById("install");
+	el.innerText = 'curl -fsSL https://micro.mu/install.sh | /bin/bash';
+	return false;
+})
+
+$("#install-linux").click(function(e) {
+	var el = document.getElementById("install");
+	el.innerText = 'wget -q https://micro.mu/install.sh -O - | /bin/bash';
+	return false;
+})
+
+$("#install-windows").click(function(e) {
+	var el = document.getElementById("install");
+	el.innerText = 'powershell -Command "iwr -useb https://micro.mu/install.ps1 | iex"';
+	return false;
+})
 
 $(".oss").click(function(e) {
     e.preventDefault()
