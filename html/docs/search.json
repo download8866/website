@@ -468,11 +468,11 @@
 
 
 {
-"title": "Service Network",
-"tags": "network",
+"title": "Network",
+"tags": "micronetwork",
 "keywords": "network",
 "url": "network.html",
-"summary": "The micro network service is a multi-cloud service networking solution"
+"summary": "The micro network is a global microservices network"
 }
 ,
 
@@ -686,6 +686,17 @@
 ,
 
 
+
+
+
+{
+"title": "Service Network",
+"tags": "network",
+"keywords": "network",
+"url": "service-network.html",
+"summary": "The micro network service is a multi-cloud service networking solution"
+}
+,
 
 
 

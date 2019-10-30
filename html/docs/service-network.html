@@ -5,11 +5,11 @@
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description"
-    content="a package for defining api routes and handlers">
-<meta name="keywords" content="go-micro,  go-api">
+    content="The micro network service is a multi-cloud service networking solution">
+<meta name="keywords" content="network,  network">
 
 
-<title>Go API | Micro</title>
+<title>Service Network | Micro</title>
 
 
 <link rel="stylesheet" href="/docs/css/syntax.css">
@@ -228,7 +228,7 @@
             
             
             
-            <li class="active dark"><a href="/docs/go-api.html">API Handlers</a></li>
+            <li><a href="/docs/go-api.html">API Handlers</a></li>
             
             
             
@@ -306,7 +306,7 @@
             
             
             
-            <li><a href="/docs/service-network.html">Service Network</a></li>
+            <li class="active dark"><a href="/docs/service-network.html">Service Network</a></li>
             
             
             
@@ -452,7 +452,7 @@
                 <!-- Content Column -->
                 <div class="col-md-9">
                     <div class="post-header">
-   <h1 class="post-title-main">Go API</h1>
+   <h1 class="post-title-main">Service Network</h1>
 </div>
 
 
@@ -460,135 +460,70 @@
 <div class="post-content">
 
    
-    <div class="summary">a package for defining api routes and handlers</div>
+    <div class="summary">The micro network service is a multi-cloud service networking solution</div>
    
 
     
 
-  <h1 id="overview">Overview</h1>
+  <p>The micro network service is a multi-cloud service networking solution which works across public and private environments.</p>
 
-<p>Go API is a pluggable API framework driven by service discovery to help build powerful public API gateways.</p>
+<p><img src="images/network.svg" /></p>
 
-<p>The Go API library provides api gateway routing capabilities. A microservice architecture decouples application logic into 
-separate service. An api gateway provides a single entry point to consolidate these services into a unified api. The 
-Go API uses routes defined in service discovery metadata to generate routing rules and serve http requests.</p>
+<h2 id="overview">Overview</h2>
 
-<p><img src="https://micro.mu/docs/images/go-api.png?v=1" alt="Go API" /></p>
+<p>The micro network provides multi-cloud capability and builds a large scale flat network over which all services can communicate with each other. 
+It makes use of our proxy, router, tunnel and network packages in go-micro to product global routing across any environment.</p>
 
-<p>Go API is the basis for the <a href="https://micro.mu/docs/api.html">micro api</a>.</p>
+<p>The network generates a routing table based on the local service registry and shares this amongst nodes. It builds in a router and proxy so 
+any request made to any network node can be routed across the global network. It prioritises local routing first and can range up to 3 
+hops in a chain if needed.</p>
 
-<h2 id="handlers">Handlers</h2>
+<h2 id="run-network">Run Network</h2>
 
-<p>Handlers are http handlers used for handling requests. It uses the <code class="highlighter-rouge">http.Handler</code> pattern for convenience.</p>
+<p>Start the network seed node (Runs on port :8085)</p>
 
-<ul>
-  <li><a href="#api-handler"><code class="highlighter-rouge">api</code></a> - Handles any HTTP request. Gives full control over the http request/response via RPC.</li>
-  <li><a href="#broker-handler"><code class="highlighter-rouge">broker</code></a> - A http handler which implements the go-micro broker interface</li>
-  <li><a href="#cloudevents-handler"><code class="highlighter-rouge">cloudevents</code></a> -  Handles CloudEvents and publishes to a message bus.</li>
-  <li><a href="#event-handler"><code class="highlighter-rouge">event</code></a> -  Handles any HTTP request and publishes to a message bus.</li>
-  <li><a href="#http-handler"><code class="highlighter-rouge">http</code></a> - Handles any HTTP request and forwards as a reverse proxy.</li>
-  <li><a href="#registry-handler"><code class="highlighter-rouge">registry</code></a> - A http handler which implements the go-micro registry interface</li>
-  <li><a href="#rpc-handler"><code class="highlighter-rouge">rpc</code></a> - Handles json and protobuf POST requests. Forwards as RPC.</li>
-  <li><a href="#web-handler"><code class="highlighter-rouge">web</code></a> - The HTTP handler with web socket support included.</li>
-</ul>
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>micro network
+</code></pre></div></div>
 
-<h2 id="api-handler">API Handler</h2>
+<p>Start the next nodes in a different environment connecting to the first (assuming its running at 10.0.0.1:8085)</p>
 
-<p>The API handler is the default handler. It serves any HTTP requests and forwards on as an RPC request with a specific format.</p>
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>micro network <span class="nt">--nodes</span><span class="o">=</span>10.0.0.1:8085
+</code></pre></div></div>
 
-<ul>
-  <li>Content-Type: Any</li>
-  <li>Body: Any</li>
-  <li>Forward Format: <a href="https://github.com/micro/go-micro/blob/master/api/proto/api.proto#L11">api.Request</a>/<a href="https://github.com/micro/go-micro/blob/master/api/proto/api.proto#L21">api.Response</a></li>
-  <li>Path: <code class="highlighter-rouge">/[service]/[method]</code></li>
-  <li>Resolver: Path is used to resolve service and method</li>
-</ul>
+<h2 id="network-services">Network Services</h2>
 
-<h2 id="broker-handler">Broker Handler</h2>
+<p>You may now list the nodes, routes, services and graph</p>
 
-<p>The broker handler is a http handler which serves the go-micro broker interface</p>
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code># list the nodes
+micro network nodes
 
-<ul>
-  <li>Content-Type: Any</li>
-  <li>Body: Any</li>
-  <li>Forward Format: HTTP</li>
-  <li>Path: <code class="highlighter-rouge">/</code></li>
-  <li>Resolver: Topic is specified as a query param</li>
-</ul>
+# list the routes
+micro network routes
 
-<p>Post the request and it will be published</p>
+# list the services
+micro network services
 
-<h2 id="cloudevents-handler">CloudEvents Handler</h2>
+# print the graph
+micro network graph
+</code></pre></div></div>
 
-<p>The CloudEvents handler serves HTTP and forwards the request as a CloudEvents message over a message bus using the go-micro/client.Publish method.</p>
+<p>Any request now made through the network will be proxied to a service on the other side.</p>
 
-<ul>
-  <li>Content-Type: Any</li>
-  <li>Body: Any</li>
-  <li>Forward Format: Request is formatted as <a href="https://github.com/cloudevents/spec">CloudEvents</a> message</li>
-  <li>Path: <code class="highlighter-rouge">/[topic]</code></li>
-  <li>Resolver: Path is used to resolve topic</li>
-</ul>
+<p>Set your proxy to use the network</p>
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MICRO_PROXY=go.micro.network go run main.go
+</code></pre></div></div>
 
-<h2 id="event-handler">Event Handler</h2>
+<p>Your service will direct all traffic through the network.</p>
 
-<p>The event handler serves HTTP and forwards the request as a message over a message bus using the go-micro/client.Publish method.</p>
+<h2 id="authentication">Authentication</h2>
 
-<ul>
-  <li>Content-Type: Any</li>
-  <li>Body: Any</li>
-  <li>Forward Format: Request is formatted as <a href="https://github.com/micro/go-api/blob/master/proto/api.proto#L28L39">go-api/proto.Event</a></li>
-  <li>Path: <code class="highlighter-rouge">/[topic]/[event]</code></li>
-  <li>Resolver: Path is used to resolve topic and event name</li>
-</ul>
+<p>Specify a network token to limit access to the network.</p>
 
-<h2 id="http-handler">HTTP Handler</h2>
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MICRO_NETWORK_TOKEN=foobar go run main.go
+</code></pre></div></div>
 
-<p>The http handler is a http reverse proxy with built in service discovery.</p>
-
-<ul>
-  <li>Content-Type: Any</li>
-  <li>Body: Any</li>
-  <li>Forward Format: HTTP Reverse proxy</li>
-  <li>Path: <code class="highlighter-rouge">/[service]</code></li>
-  <li>Resolver: Path is used to resolve service name</li>
-</ul>
-
-<h2 id="registry-handler">Registry Handler</h2>
-
-<p>The registry handler is a http handler which serves the go-micro registry interface</p>
-
-<ul>
-  <li>Content-Type: Any</li>
-  <li>Body: JSON</li>
-  <li>Forward Format: HTTP</li>
-  <li>Path: <code class="highlighter-rouge">/</code></li>
-  <li>Resolver: GET, POST, DELETE used to get service, register or deregister</li>
-</ul>
-
-<h2 id="rpc-handler">RPC Handler</h2>
-
-<p>The RPC handler serves json or protobuf HTTP POST requests and forwards as an RPC request.</p>
-
-<ul>
-  <li>Content-Type: <code class="highlighter-rouge">application/json</code> or <code class="highlighter-rouge">application/protobuf</code></li>
-  <li>Body: JSON or Protobuf</li>
-  <li>Forward Format: json-rpc or proto-rpc based on content</li>
-  <li>Path: <code class="highlighter-rouge">/[service]/[method]</code></li>
-  <li>Resolver: Path is used to resolve service and method</li>
-</ul>
-
-<h2 id="web-handler">Web Handler</h2>
-
-<p>The web handler is a http reverse proxy with built in service discovery and web socket support.</p>
-
-<ul>
-  <li>Content-Type: Any</li>
-  <li>Body: Any</li>
-  <li>Forward Format: HTTP Reverse proxy including web sockets</li>
-  <li>Path: <code class="highlighter-rouge">/[service]</code></li>
-  <li>Resolver: Path is used to resolve service name</li>
-</ul>
+<p>Nodes must provide a valid and matching token to join the network. The default token is “micro” which allows 
+any node to join and communicate between them.</p>
 
 
 

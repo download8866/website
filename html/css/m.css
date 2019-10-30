@@ -21,6 +21,18 @@
     padding-top: 4%;
     padding-bottom: 5%;
     }
+    .tagline {
+      padding-top: 35px;
+    }
+    @media only screen and (max-width: 480px) {
+        .navbar, .description {
+          margin: 0;
+        }
+        .main, .tagline {
+            padding-top: 0;
+	    margin-top: 0;
+        }
+    }
     .center {
     text-align:center;
     }
