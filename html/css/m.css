@@ -1,0 +1,103 @@
+    html, body { 
+    height: 100%;
+    font-size: 16px;
+    font-family: medium-content-sans-serif-font,"Lucida Grande","Lucida Sans Unicode","Lucida Sans",Geneva,Arial,sans-serif;
+    color: #2F2F2F;
+    }
+    body {
+    margin-top: 25px;
+    }
+    a { color: #3B94D9; }
+    .navbar-brand > a:hover { text-decoration: none; }
+    #about, .footer, .footer i {
+	background-color: #252531;
+	color: #fff;
+	font-weight: bold;
+    }
+    .main {
+    min-height: calc(100% - 120px);
+    min-height: calc(100vh - 120px);
+    margin-top: 10px;
+    padding-top: 4%;
+    padding-bottom: 5%;
+    }
+    .center {
+    text-align:center;
+    }
+    .rule {
+    border: 1px solid #eee;
+    }
+    .grey {
+    background: #333;
+    color: #ffffff;
+    }
+    .grey a {
+    text-decoration: underline;
+    color: #ffffff;
+    }
+    .btn: {
+    border-radius: 25px;
+    }
+    .pad {
+    padding: 120px 0 120px 0;
+    }
+    .tpad {
+    padding: 120px 0 0 0;
+    }
+    .bpad {
+    padding: 0 0 120px 0;
+    }
+    .more {
+    margin-top: 25px;
+    }
+    .logos {
+    max-width: 600px;
+    padding-top: 50px;
+    }
+    .logos ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    }
+    .logos li {
+    padding: 5px;
+    display: inline-block;
+    vertical-align: middle;
+    }
+    .logos img {
+    width: 100px;
+    height: auto;
+    }
+    .blurb {
+    margin-top: 10%;
+    }
+    .navbar {
+    background: #ffffff;
+    border: 0;
+    padding: 0;
+    margin-bottom: 20px;
+    }
+    .navbar-toggler {
+      border: 0;
+    }
+    .repo a { font-weight: bold; };
+    .table-secondary > th { background: #f5f6f7; };
+    .footer a { color: #333;}
+    .title .text { color: #333; font-weight: 1000; vertical-align: middle; font-size: 2.5em; }
+    .title a { color: #333; vertical-align: bottom }
+    .title .nav { vertical-align: bottom; }
+    .footer { border-top: 1px solid #eee; padding: 25px 0 25px 0; }
+    .footer ul { margin: 0; }
+    h2 a { color: #333; text-decoration: underline;}
+    .github { color: #333; text-decoration: none; }
+    .install {
+        background-color: #2F2F2F; 
+        padding: 15px;
+        border: 2px solid #dee2e6;
+    }
+    .install:hover {
+        cursor: pointer;
+    }
+    .install pre {
+        color: white;
+    }

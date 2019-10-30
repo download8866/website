@@ -1,0 +1,1666 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title></title>
+    <description>极简构建微服务</description>
+    <link>https://micro.mu//blog/cn/</link>
+    <atom:link href="https://micro.mu//blog/cn/feed.xml" rel="self" type="application/rss+xml"/>
+    <pubDate>Thu, 04 Jul 2019 11:37:33 +0100</pubDate>
+    <lastBuildDate>Thu, 04 Jul 2019 11:37:33 +0100</lastBuildDate>
+    <generator>Jekyll v3.8.5</generator>
+    
+      <item>
+        <title>Micro源码系列 - Go-Micro服务是如何注册的</title>
+        <description>&lt;p&gt;微服务架构中注册是非常有意思的角色，服务中的客户端通过注册机制定位目标服务的具体位置。服务注册中心可以说是服务实例的数据库，在里面有服务的各种信息，包括位置等。服务实例在启动时通过注册机制&lt;strong&gt;注册&lt;/strong&gt;到中心，并且在关闭前从中心自动&lt;strong&gt;卸载&lt;/strong&gt;。不过光有&lt;strong&gt;注册&lt;/strong&gt;与&lt;strong&gt;卸载&lt;/strong&gt;两个步骤还不够，在两者之间，我们还需要&lt;strong&gt;健康检查&lt;/strong&gt;来确定服务是否可以持续接收请求。&lt;/p&gt;
+
+&lt;p&gt;同时，我们需要指出一个大家特别容易犯的错误：很多人都会觉得服务注册就是为了负载均衡，其实不是，&lt;u&gt;服务注册是为了客户端或服务端定位服务实例，并确定选择哪一个服务来发送请求的机制&lt;/u&gt;。而负载均衡只是选择服务时如何让各服务之间平衡提供响应的策略，它可能依赖注册，但不是必须，因为有哪些服务可以通过很多方式告之客户端，而并且非一律从注册中心获取。&lt;/p&gt;
+
+&lt;p&gt;Micro体系中的每一种类型的服务都包含有注册组件（Registry）。当服务启动时，它会把所有描述自身信息的元数据（metadata，比如服务名、地址、transport、编码等等）提取出来，作为关键信息，用于下一步注册成为服务节点。尔后，如果声明有TTL和Interval，则会定期触发重注册机制。&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;/blog/cn/2019/05/23/how-does-go-micro-server-be-bulit.html&quot;&gt;前面一章&lt;/a&gt;我们大体讲解了Go-Micro中的服务是如何构建的。接下来我们就从代码层面给大家演示服务注册。&lt;/p&gt;
+
+&lt;h2 id=&quot;注册中心接口&quot;&gt;注册中心接口&lt;/h2&gt;
+
+&lt;p&gt;注册组件接口&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/registry/registry.go&quot;&gt;&lt;strong&gt;registry&lt;/strong&gt;&lt;/a&gt;中：&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;package registry
+// ...
+type Registry interface {
+        Init(...Option) error
+        Options() Options
+        Register(*Service, ...RegisterOption) error
+        Deregister(*Service) error
+        GetService(string) ([]*Service, error)
+        ListServices() ([]*Service, error)
+        Watch(...WatchOption) (Watcher, error)
+        String() string
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;在go-micro包中，共有4种注册实现consul、gossip、mdns、memory，前两个都是基于hashicorp公司的协议，mdns则是基于组网广播实现，memory则是本地实现。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;consul 依赖hashicorp的组件，但是功能强大、完整&lt;/li&gt;
+  &lt;li&gt;gossip 基于SWIM协议广播，零依赖&lt;/li&gt;
+  &lt;li&gt;mdns 轻量、零依赖，但是对环境有要求，某些环境不支持mdns的无法正常使用&lt;/li&gt;
+  &lt;li&gt;memory 本地解决方案，不可跨主机访问&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;另外在&lt;a href=&quot;https://github.com/micro/go-plugins/tree/master/registry&quot;&gt;&lt;strong&gt;go-plugins&lt;/strong&gt;&lt;/a&gt;中有其它注册实现，比如etcd、eureka、k8s、nats、zk等等&lt;/p&gt;
+
+&lt;p&gt;大体解释下接口中每个方法的作用&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;Init 初始化&lt;/li&gt;
+  &lt;li&gt;Options 获取配置选项&lt;/li&gt;
+  &lt;li&gt;Register 注册服务&lt;/li&gt;
+  &lt;li&gt;Deregister 卸载服务&lt;/li&gt;
+  &lt;li&gt;GetService 获取指定服务&lt;/li&gt;
+  &lt;li&gt;ListServices 列出所有服务&lt;/li&gt;
+  &lt;li&gt;Watch watcher 负责侦听变动&lt;/li&gt;
+  &lt;li&gt;String 注册信息转成字符串描述&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;可见，接口定义的注册组件是几乎完全自包含，它自行注册、卸载、侦听等，服务不需要关心自己如何注册、卸载，只需要将注册中心的实现作为Option导入自身启动即可&lt;/p&gt;
+
+&lt;blockquote&gt;
+  &lt;p&gt;通过定义注册组件接口，我们便可以将服务与注册中心解耦&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;h2 id=&quot;声明注册中心&quot;&gt;声明注册中心&lt;/h2&gt;
+
+&lt;p&gt;我们知道Go-Micro可以通过命令行参数–&lt;strong&gt;registry&lt;/strong&gt;或者方法参数&lt;strong&gt;micro.Registry&lt;/strong&gt;来指定服务注册中心，但是&lt;strong&gt;Register&lt;/strong&gt;方法中并没有选择注册中心的过程，我们看下Go-Micro在构建服务时的动作：&lt;/p&gt;
+
+&lt;p&gt;命令行参数：&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-bash&quot;&gt;go run main.go --registry=consul
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Go-Micro预置有4种命令行参数：&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/config/cmd/cmd.go#L189-L194&quot;&gt;cmd.go&lt;/a&gt;&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;DefaultRegistries = map[string]func(...registry.Option) registry.Registry{
+                &quot;consul&quot;: consul.NewRegistry,
+                &quot;gossip&quot;: gossip.NewRegistry,
+                &quot;mdns&quot;:   mdns.NewRegistry,
+                &quot;memory&quot;: rmem.NewRegistry,
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;在识别命令行传入参数后，Micro就会匹配DefaultRegistries中的key，然后把注册组件附加给服务。&lt;/p&gt;
+
+&lt;blockquote&gt;
+  &lt;p&gt;*Env方式大同小异，这里不表&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;p&gt;方法参数，通过micro.Registry传入：&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;        micReg := consul.NewRegistry(registryOptions)
+        service := micro.NewService(
+                // ...
+                micro.Registry(micReg),
+                // ...
+        )
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;因为Registry是自包含的，故而我们只需要将其传入服务，让服务调用即可。&lt;/p&gt;
+
+&lt;h2 id=&quot;服务启动&quot;&gt;服务启动&lt;/h2&gt;
+
+&lt;p&gt;简单回顾下服务在&lt;strong&gt;Start&lt;/strong&gt;时的动作，我们用默认的&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/server/rpc_server.go#L480-L605&quot;&gt;rpc_server&lt;/a&gt;来演示，其它如grpc_server等大同小异，不影响理解。&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func (s *rpcServer) Start() error {
+        // ...
+        // use RegisterCheck func before register
+        if err = s.opts.RegisterCheck(s.opts.Context); err != nil {
+                log.Logf(&quot;Server %s-%s register check error: %s&quot;, config.Name, config.Id, err)
+        } else {
+                // 注册
+                if err = s.Register(); err != nil {
+                        log.Logf(&quot;Server %s-%s register error: %s&quot;, config.Name, config.Id, err)
+                }
+        }
+
+        // ...
+        
+        // Interval、卸载代码，下面我们会讲到
+        return nil
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;&lt;strong&gt;Start()&lt;/strong&gt;方法在检测完信息后便进行注册动作，下面我们分析注册方法&lt;strong&gt;Register&lt;/strong&gt;&lt;/p&gt;
+
+&lt;p&gt;Micro服务在注册时有两个关键点，元数据、自定义handler&lt;/p&gt;
+
+&lt;p&gt;服务向中心注册一般可以分为如下几个步骤：&lt;/p&gt;
+
+&lt;p&gt;1.解析注册中心地址&lt;/p&gt;
+
+&lt;p&gt;2.准备元数据&lt;/p&gt;
+
+&lt;p&gt;3.声明节点信息&lt;/p&gt;
+
+&lt;p&gt;4.声明endpoint handlers&lt;/p&gt;
+
+&lt;p&gt;5.声明服务&lt;/p&gt;
+
+&lt;p&gt;6.注册&lt;/p&gt;
+
+&lt;p&gt;整个流程我们缩略成一个二维集合图：&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://micro.mu/blog/cn/assets/images/registry-pie.png&quot;&gt;
+  &lt;img src=&quot;/blog/cn/assets/images/registry-pie.png&quot; style=&quot;width: 100%; height: auto; margin: 0;&quot; /&gt;
+&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;接下来我们分析一下注册流程代码，大家请配合上面的集合图阅读，方便理解&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func (s *rpcServer) Register() error {
+        // 解析注册中心地址
+        // 忽略这部分代码
+
+        // 准备元数据
+        md := make(metadata.Metadata)
+        for k, v := range config.Metadata {
+                md[k] = v
+        }
+
+        // 声明节点信息
+        node := &amp;amp;registry.Node{
+                Id:       config.Name + &quot;-&quot; + config.Id,
+                Address:  addr,
+                Port:     port,
+                Metadata: md,
+        }
+
+        node.Metadata[&quot;transport&quot;] = config.Transport.String()
+        node.Metadata[&quot;broker&quot;] = config.Broker.String()
+        node.Metadata[&quot;server&quot;] = s.String()
+        node.Metadata[&quot;registry&quot;] = config.Registry.String()
+        node.Metadata[&quot;protocol&quot;] = &quot;mucp&quot;
+
+        s.RLock()
+        
+        // 声明endpoint，map元素顺序是随机的，故而使用key排序，方便每个同名服务之间显示一致
+        var handlerList []string
+        for n, e := range s.handlers { 
+                if !e.Options().Internal {
+                        handlerList = append(handlerList, n)
+                }
+        }
+        sort.Strings(handlerList)
+
+        var endpoints []*registry.Endpoint
+        for _, n := range handlerList {
+                endpoints = append(endpoints, s.handlers[n].Endpoints()...)
+        }
+         
+        // 忽略部分代码
+
+        // 声明服务信息
+        service := &amp;amp;registry.Service{
+                Name:      config.Name,
+                Version:   config.Version,
+                Nodes:     []*registry.Node{node},
+                Endpoints: endpoints,
+        }
+
+        s.Lock()
+        registered := s.registered
+        s.Unlock()
+
+        // 构建注册选项
+        rOpts := []registry.RegisterOption{registry.RegisterTTL(config.RegisterTTL)}
+
+        // 注册
+        if err := config.Registry.Register(service, rOpts...); err != nil {
+                return err
+        }
+    
+        // 忽略部分订阅代码
+
+        s.registered = true
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;以上便是服务向注册中心注册时的主要流程代码，整个注册过程非常简单。服务注册完后，我们还要定期检查与声明生存周期，也即是Interval与TTL（Time-To-Live）机制。&lt;/p&gt;
+
+&lt;h2 id=&quot;interval&quot;&gt;Interval&lt;/h2&gt;
+
+&lt;p&gt;与Register注册一样，Interval由服务触发，而不是由Registry触发，因为Registry已经暴露了Register接口，而Interval的工作只是定时重新调用Register方法，如果再把Interval放到其中，便会导致每个Registry实现都会有相同的Interval代码。&lt;/p&gt;
+
+&lt;p&gt;我们再回顾一下上面说到的&lt;strong&gt;Start&lt;/strong&gt;方法，Start方法中除了注册之外，还有循环重注册的逻辑，这一部分就是利用Interval指定的值，不间断重复向注册中心注册，以达到在线的目的：&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func (s *rpcServer) Start() error {
+	// 忽略部分代码
+
+	go func() {
+		t := new(time.Ticker)
+
+		// 仅在声明了Interval时才会执行，每隔Interval指定的时间，发送一次信号
+		if s.opts.RegisterInterval &amp;gt; time.Duration(0) {
+			t = time.NewTicker(s.opts.RegisterInterval)
+		}
+
+		// return error chan
+		var ch chan error
+
+	Loop:
+		for {
+			select {
+			// 当接收到Interval信号时重新执行注册操作
+			case &amp;lt;-t.C:
+				s.RLock()
+				registered := s.registered
+				s.RUnlock()
+				if err = s.opts.RegisterCheck(s.opts.Context); err != nil &amp;amp;&amp;amp; registered {
+					log.Logf(&quot;Server %s-%s register check error: %s, deregister it&quot;, config.Name, config.Id, err)
+					// deregister self in case of error
+					if err := s.Deregister(); err != nil {
+						log.Logf(&quot;Server %s-%s deregister error: %s&quot;, config.Name, config.Id, err)
+					}
+				} else {
+					if err := s.Register(); err != nil {
+						log.Logf(&quot;Server %s-%s register error: %s&quot;, config.Name, config.Id, err)
+					}
+				}
+			// 直到接收到退出信号，才停止重注册
+			case ch = &amp;lt;-s.exit:
+				t.Stop()
+				close(exit)
+				break Loop
+			}
+		}
+
+		// 忽略部分卸载、关连接的代码
+	}()
+
+	return nil
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;blockquote&gt;
+  &lt;p&gt;当重注册循环停止时，相当于服务不再生效，故而需要卸载、停止侦听连接请求等操作。&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;h2 id=&quot;ttl&quot;&gt;TTL&lt;/h2&gt;
+
+&lt;p&gt;TTL与Register不同，它由注册组件执行，并非以服务直接调用。故而不同的注册中心组件有不同的实现。我们这里不深入讨论，后继如果有机会，我们再讨论每个中心的TTL机制。&lt;/p&gt;
+
+&lt;h2 id=&quot;卸载&quot;&gt;卸载&lt;/h2&gt;
+
+&lt;p&gt;服务卸载相当于注册的逆过程。&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func (s *rpcServer) Deregister() error {
+	config := s.Options()
+	
+	// 忽略部分地址解析代码
+
+	node := &amp;amp;registry.Node{
+		Id:      config.Name + &quot;-&quot; + config.Id,
+		Address: addr,
+		Port:    port,
+	}
+
+	service := &amp;amp;registry.Service{
+		Name:    config.Name,
+		Version: config.Version,
+		Nodes:   []*registry.Node{node},
+	}
+
+	if err := config.Registry.Deregister(service); err != nil {
+		return err
+	}
+
+	s.Lock()
+
+	if !s.registered {
+		s.Unlock()
+		return nil
+	}
+
+	s.registered = false
+
+	// 忽略部分订阅代码
+	return nil
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;卸载的过程很简单，把服务名、版本号、节点信息向注册组件调用&lt;strong&gt;Deregister&lt;/strong&gt;即可。&lt;/p&gt;
+
+&lt;blockquote&gt;
+  &lt;p&gt;因为一个应用实例可能注册多个服务，故而，我们需要将服务名传过去，让注册组件停止对某个服务的侦听工作。&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;h2 id=&quot;总结&quot;&gt;总结&lt;/h2&gt;
+
+&lt;p&gt;我们在本篇中从源码的角度简单给大家介绍Go-Micro服务的注册流程，不过，我们并没有深入各注册中心组件去详解，这也超过本文的范畴，会让文章变得很重，大家有兴趣可以去查看各注册中心的客户端代码。&lt;/p&gt;
+
+&lt;h2 id=&quot;micro源码系列&quot;&gt;Micro源码系列&lt;/h2&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;&lt;a href=&quot;https://micro.mu/blog/cn/2019/05/23/how-does-go-micro-server-be-bulit.html&quot;&gt;Go-Micro服务的构造过程&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://micro.mu/blog/cn/2019/06/01/how-does-go-micro-register-services.html&quot;&gt;Go-Micro注册解读&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;[Go-Micro客户端解读（in progress）]&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;h2 id=&quot;参考阅读&quot;&gt;参考阅读&lt;/h2&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://microservices.io/patterns/service-registry.html&quot;&gt;服务注册&lt;/a&gt;&lt;/p&gt;
+</description>
+        <pubDate>Sat, 01 Jun 2019 10:00:00 +0100</pubDate>
+        <link>https://micro.mu//blog/cn/2019/06/01/how-does-go-micro-register-services.html</link>
+        <guid isPermaLink="true">https://micro.mu//blog/cn/2019/06/01/how-does-go-micro-register-services.html</guid>
+        
+        
+      </item>
+    
+      <item>
+        <title>2019年Micro的整合工作</title>
+        <description>&lt;p&gt;Micro生态以&lt;a href=&quot;https://github.com/micro/go-micro&quot;&gt;&lt;strong&gt;go-micro&lt;/strong&gt;&lt;/a&gt;微服务开发框架为核心，已经开启她的微服务演近进程，Micro一直专注为微服务核心开发提供方案，通过Micro的抽象结构，大家在开发过程中不需要再关心微服务系统架构的复杂性。&lt;/p&gt;
+
+&lt;p&gt;经过几年的时间演进，我们已经把Go-Micro扩展超过了原先的定位，发展出了其它工具、库、插件。这一过程在&lt;strong&gt;虽然解决了问题&lt;/strong&gt;与&lt;strong&gt;期望开发者如何（简便地）使用Micro工具链&lt;/strong&gt;之间产生了矛盾。所以我们现在正准备把这些工具库整合起来，给大家提供更好的使用体验。&lt;/p&gt;
+
+&lt;p&gt;Micro自己的定位是成为微服务开发中的独立开发框架与运行时管理工具。&lt;/p&gt;
+
+&lt;p&gt;在讨论整合工作之前，我们回顾一下截止目前的情况。&lt;/p&gt;
+
+&lt;h2 id=&quot;核心焦点&quot;&gt;核心焦点&lt;/h2&gt;
+
+&lt;p&gt;项目刚开始的时候，Go-micro的定位是专注于微服务之间的通信，并且我们一直努力实现这一目的。到目前为止，我们的坚持与专注也正是驱动micro逐渐走向成功的原因。经过这些年的发展，我们收到非常多的需求，这些功能都逐步加入到了Go-Micro中。它们之中大多数与弹性、安全、同步及可配置性有关。&lt;/p&gt;
+
+&lt;center&gt;
+&lt;img src=&quot;https://micro.mu/docs/images/go-micro.svg&quot; style=&quot;width: 80%; height: auto;&quot; /&gt;
+&lt;/center&gt;
+
+&lt;p&gt;把社区要求的那些额外功能加上去有很多好处，不过，我们更希望从一开始就集中精力解决一个问题，所以我们采取了不同的方式，促进社区完成这些事。&lt;/p&gt;
+
+&lt;h2 id=&quot;生态系统与插件&quot;&gt;生态系统与插件&lt;/h2&gt;
+
+&lt;p&gt;打造产品并不仅仅是实现服务发现、消息编码以及请求-响应。我们一直铭记着，同时也一直希望我们可以通过插件化、可扩展的接口，让开发者们拥有更多选择，以帮助大家开发出更强大的服务平台。
+我们在&lt;a href=&quot;https://micro.mu/explore/&quot;&gt;探索&lt;/a&gt;页面展示了部分使用我们框架micro以及&lt;a href=&quot;https://github.com/micro/go-plugins&quot;&gt;go-plugins&lt;/a&gt;的开源作品。&lt;/p&gt;
+
+&lt;center&gt;
+&lt;img src=&quot;https://micro.mu/explorer.png&quot; style=&quot;width: 80%; height: auto;&quot; /&gt;
+&lt;/center&gt;
+
+&lt;p&gt;Go Plugins已经支持开发者们在系统中集成复杂的工具，比如prometheus监控、zipkin链路追踪或者kafka等等。&lt;/p&gt;
+
+&lt;h2 id=&quot;关于服务接入点&quot;&gt;关于服务接入点&lt;/h2&gt;
+
+&lt;p&gt;在Micro体系中，Go-Micro作为微服务开发的大心脏，不过，一旦应用开发完成，其它问题就会随之而来，我们如何查询这些服务，如何与之交互，又如何将其对外服务，等等&lt;/p&gt;
+
+&lt;p&gt;Go-Micro基于rpc或protobuf协议，并且协议也是可插拔，不依赖运行环境，那我们就需要有某种机制来定位到某个服务，对于Go-Micro本身亦是如此。基于这些想法，我们创建了&lt;a href=&quot;https://github.com/micro/micro&quot;&gt;&lt;strong&gt;micro&lt;/strong&gt;&lt;/a&gt;，它是微服务工具集，可以通过它提供API网关、web管理控制台、命令行CLI、Slack机器人、服务代理等等。&lt;/p&gt;
+
+&lt;center&gt;
+&lt;img src=&quot;https://micro.mu/runtime3.svg&quot; style=&quot;width: 80%; height: auto;&quot; /&gt;
+&lt;/center&gt;
+
+&lt;p&gt;我们在&lt;a href=&quot;https://github.com/micro/micro&quot;&gt;&lt;strong&gt;micro&lt;/strong&gt;&lt;/a&gt;集成有HTTP API、浏览器界面、Slack命令以及CLI接口，大家可以通过micro管理服务。这些都是我们在构建服务时常见的方法，而且我们需要提供运行时工具使得这些成为可能，不过，现在的重心仍然在通信上。&lt;/p&gt;
+
+&lt;h2 id=&quot;其它工具&quot;&gt;其它工具&lt;/h2&gt;
+
+&lt;p&gt;我们的插件与工具集尽管已经具备很多功能，但是仍然有不少欠缺。社区希望我们能围绕Micro平台持续开发，解决更多的问题，而不是他们在自己公司内部去拼拼揍揍。针对工具库，我们要做到像Go-micro插件那样的抽象化，比如像动态配置，分布同步，支持更多的系统如k8等等。&lt;/p&gt;
+
+&lt;p&gt;针对这些问题，我们已经开发出下列的工具库：&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;a href=&quot;https://github.com/micro/go-config&quot;&gt;micro/go-config&lt;/a&gt; - 动态配置库&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://github.com/asim/go-sync&quot;&gt;micro/go-sync&lt;/a&gt; - 分布式同步库&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://github.com/micro/kubernetes&quot;&gt;micro/kubernetes&lt;/a&gt; - micro的k8s初始化构建工具&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://github.com/micro/examples&quot;&gt;examples&lt;/a&gt; - 示例应用&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://github.com/microhq&quot;&gt;microhq&lt;/a&gt; - micro服务预置库&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;这些仓库、工具都是为了解决社区里提出的问题而创建的。经过4年的发展，对于老用户而言尚能接受，但是对于新用户来说，分散的仓库导致大家体验起来越来越麻烦、晦涩。想到这些过高的门槛，我们得做出改变。&lt;/p&gt;
+
+&lt;h2 id=&quot;整合&quot;&gt;整合&lt;/h2&gt;
+
+&lt;p&gt;过去的几周里我们发布了&lt;a href=&quot;https://github.com/micro/go-micro&quot;&gt;&lt;strong&gt;go-micro&lt;/strong&gt;&lt;/a&gt;数个版本，主要聚焦在我们用户的需求上。我们渐行渐悟，有些仓库本身作为框架的一部分，理应包含在框架之中的，但是因为历史原因彼此是分隔的，所以我们要把它们整合起来，让大家不需要再分心去需其它地方查找集成。&lt;/p&gt;
+
+&lt;p&gt;从根本上说，&lt;strong&gt;go-micro&lt;/strong&gt;将会演变成微服务开发的全家桶。&lt;/p&gt;
+
+&lt;p&gt;我们已经开始把我们所有的库都整合到go-micro中，接下来的几个星期我们会进行重构，然后给大家一个更至简、更丰富的开发体验，比如日志、链路追踪、指标监控、安全认证等等。&lt;/p&gt;
+
+&lt;center&gt;
+&lt;img src=&quot;/blog/cn/assets/images/go-micro-repo.png&quot; style=&quot;width: 80%; height: auto;&quot; /&gt;
+&lt;/center&gt;
+
+&lt;p&gt;&lt;br /&gt;&lt;/p&gt;
+
+&lt;p&gt;不过，我们也没有忘记&lt;a href=&quot;https://github.com/micro/micro&quot;&gt;&lt;strong&gt;micro&lt;/strong&gt;&lt;/a&gt;。我们认为，大家构建微服务，就需要有入口去查询接口、执行命令以及管理这些服务。大家一致认为&lt;strong&gt;micro&lt;/strong&gt;要发展成Micro体系中的运行时管理工具。我们正着手实现Micro体系开发到管理的闭环，未来我们会有新消息发布。&lt;/p&gt;
+
+&lt;h2 id=&quot;总结&quot;&gt;总结&lt;/h2&gt;
+
+&lt;p&gt;Micro可能是最简单微服务构建框架，她也逐渐成为Golang微服务开发的标准。现在我们通过把Micro仓库中现有的工具与库整合，打造成单一的开发框架与运行时，不再分散到不同库中，让大家在开发微服务时更加简单。&lt;/p&gt;
+
+&lt;center&gt;...&lt;/center&gt;
+&lt;p&gt;&lt;br /&gt;&lt;/p&gt;
+
+&lt;p&gt;想了解更多，请访问我们的&lt;a href=&quot;https://micro.mu&quot;&gt;官方站点&lt;/a&gt;，订阅我们的&lt;a href=&quot;https://twitter.com/microhq&quot;&gt;twitter&lt;/a&gt;、微信公众号MicroHQ、&lt;a href=&quot;https://weibo.com/microhq&quot;&gt;微博&lt;/a&gt;。
+也可以加入&lt;a href=&quot;https://micro-services.slack.com&quot;&gt;slack&lt;/a&gt;，选择加入中国区Channel&lt;/p&gt;
+
+&lt;h6&gt;&lt;a href=&quot;https://github.com/micro/micro&quot;&gt;&lt;i class=&quot;fa fa-github fa-2x&quot;&gt;&lt;/i&gt; Micro&lt;/a&gt;&lt;/h6&gt;
+</description>
+        <pubDate>Sat, 01 Jun 2019 10:00:00 +0100</pubDate>
+        <link>https://micro.mu//blog/cn/2019/06/01/the-great-consolidation.html</link>
+        <guid isPermaLink="true">https://micro.mu//blog/cn/2019/06/01/the-great-consolidation.html</guid>
+        
+        
+      </item>
+    
+      <item>
+        <title>博物馆</title>
+        <description>&lt;p&gt;我们为大家收集了Golang的相关资料，包含有检查、id生成、科学装包代理、调优秘笈、各种玩具等等，不限于Micro体系，旨在有个入口可以帮助大家查阅需要的资料，本博客会持续更新！&lt;/p&gt;
+
+&lt;h2 id=&quot;官方库&quot;&gt;官方库&lt;/h2&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;博物馆
+    &lt;ul&gt;
+      &lt;li&gt;&lt;a href=&quot;https://github.com/avelino/awesome-go&quot;&gt;https://github.com/avelino/awesome-go&lt;/a&gt;&lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/li&gt;
+  &lt;li&gt;标准
+    &lt;ul&gt;
+      &lt;li&gt;项目结构 &lt;a href=&quot;https://github.com/golang-standards/project-layout&quot;&gt;https://github.com/golang-standards/project-layout&lt;/a&gt;&lt;/li&gt;
+      &lt;li&gt;静态检查 &lt;a href=&quot;https://github.com/dominikh/go-tools&quot;&gt;https://github.com/dominikh/go-tools&lt;/a&gt;&lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/li&gt;
+  &lt;li&gt;failpoint错误注入
+    &lt;ul&gt;
+      &lt;li&gt;&lt;a href=&quot;https://github.com/pingcap/failpoint&quot;&gt;https://github.com/pingcap/failpoint&lt;/a&gt;&lt;/li&gt;
+      &lt;li&gt;&lt;a href=&quot;https://github.com/etcd-io/gofail&quot;&gt;https://github.com/etcd-io/gofail&lt;/a&gt;&lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/li&gt;
+  &lt;li&gt;id 生成
+    &lt;ul&gt;
+      &lt;li&gt;去中心化
+        &lt;ul&gt;
+          &lt;li&gt;&lt;a href=&quot;https://github.com/sony/sonyflake&quot;&gt;https://github.com/sony/sonyflake&lt;/a&gt;&lt;/li&gt;
+        &lt;/ul&gt;
+      &lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/li&gt;
+  &lt;li&gt;go mod
+    &lt;ul&gt;
+      &lt;li&gt;翻墙代理
+        &lt;ul&gt;
+          &lt;li&gt;&lt;a href=&quot;https://github.com/goproxy/goproxy.cn&quot;&gt;https://github.com/goproxy/goproxy.cn&lt;/a&gt;&lt;/li&gt;
+          &lt;li&gt;&lt;a href=&quot;https://goproxy.io/&quot;&gt;https://goproxy.io/&lt;/a&gt;&lt;/li&gt;
+        &lt;/ul&gt;
+      &lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/li&gt;
+  &lt;li&gt;性能调优
+    &lt;ul&gt;
+      &lt;li&gt;golang pprof
+        &lt;ul&gt;
+          &lt;li&gt;&lt;a href=&quot;https://golang.org/pkg/net/http/pprof&quot;&gt;https://golang.org/pkg/net/http/pprof/&lt;/a&gt;&lt;/li&gt;
+        &lt;/ul&gt;
+      &lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/li&gt;
+  &lt;li&gt;k8s
+    &lt;ul&gt;
+      &lt;li&gt;玩具
+        &lt;ul&gt;
+          &lt;li&gt;线上玩k8s &lt;a href=&quot;https://labs.play-with-k8s.com&quot;&gt;https://labs.play-with-k8s.com&lt;/a&gt;&lt;/li&gt;
+        &lt;/ul&gt;
+      &lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;个人站点&quot;&gt;个人站点&lt;/h2&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;a href=&quot;https://github.com/hhstore/blog&quot;&gt;hhstore&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+</description>
+        <pubDate>Thu, 23 May 2019 10:00:00 +0100</pubDate>
+        <link>https://micro.mu//blog/cn/2019/05/23/museums-libs.html</link>
+        <guid isPermaLink="true">https://micro.mu//blog/cn/2019/05/23/museums-libs.html</guid>
+        
+        
+      </item>
+    
+      <item>
+        <title>Micro源码系列 - Go-Micro服务的构造过程</title>
+        <description>&lt;p&gt;在每一个技术领域，特别是微服务这一分支，&lt;strong&gt;Go-Micro&lt;/strong&gt;尝试以最简单的方式帮助大家以最快的速度构建微服务。我们有比较详细但是仍需要大量持续更新、增进的文档，也有足够多的示例代码帮助大家验证每个功能点是否满足大家的业务需求。同时，我们在总结很多朋友的常询问的问题后，发现大家对&lt;strong&gt;Go-Micro&lt;/strong&gt;的源码实现都很有兴趣。&lt;/p&gt;
+
+&lt;p&gt;故而，在大家对了解如何使用&lt;strong&gt;Go-Micro&lt;/strong&gt;来构建服务后，我们专门用这一系列来从设计到源码系统地讲解&lt;strong&gt;Go-Micro&lt;/strong&gt;。&lt;/p&gt;
+
+&lt;h2 id=&quot;总架构&quot;&gt;总架构&lt;/h2&gt;
+
+&lt;p&gt;首先，我们从&lt;strong&gt;Go-Micro&lt;/strong&gt;的架构图开始，回顾一下：&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://micro.mu/blog/cn/assets/images/go-micro.svg&quot;&gt;
+  &lt;img src=&quot;https://micro.mu/blog/cn/assets/images/go-micro.svg&quot; style=&quot;width: 100%; height: auto; margin: 0;&quot; /&gt;
+&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;如上图所示，&lt;strong&gt;Go-Micro&lt;/strong&gt;由三层设计共5大模块组成。&lt;/p&gt;
+
+&lt;p&gt;最上层的&lt;strong&gt;service&lt;/strong&gt;是基于&lt;strong&gt;Go-Micro&lt;/strong&gt;所构建的服务，属于应用层，它属于&lt;strong&gt;Go-Micro&lt;/strong&gt;末端。&lt;/p&gt;
+
+&lt;p&gt;中层的&lt;strong&gt;Client&lt;/strong&gt;与&lt;strong&gt;Server&lt;/strong&gt;是第一层中&lt;strong&gt;service&lt;/strong&gt;所包含的&lt;strong&gt;请求端&lt;/strong&gt;与&lt;strong&gt;响应端&lt;/strong&gt;，它们存在于&lt;strong&gt;service&lt;/strong&gt;中，处于设计中的&lt;strong&gt;中游&lt;/strong&gt;，是&lt;strong&gt;Go-Micro&lt;/strong&gt;体系中一切请求与响应的出入口。&lt;/p&gt;
+
+&lt;p&gt;最下层的便是&lt;strong&gt;Go-Micro&lt;/strong&gt;核心5模块所在，broker负责消息，Codec负责编码，Registry负责注册发现，Selector负责负载均衡，Transport负责接收请求与响应。&lt;/p&gt;
+
+&lt;p&gt;&lt;strong&gt;Go-Micro&lt;/strong&gt;&lt;u&gt;本质是一个网络库（networking lib）&lt;/u&gt;。&lt;/p&gt;
+
+&lt;h2 id=&quot;三段式&quot;&gt;三段式&lt;/h2&gt;
+
+&lt;p&gt;&lt;strong&gt;Go-Micro&lt;/strong&gt;中原生服务通常由三段组成：&lt;em&gt;NewService&lt;/em&gt;，&lt;em&gt;Init&lt;/em&gt;，&lt;em&gt;Run&lt;/em&gt;。它们功能分别是创建服务，初始化服务，运行服务。&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func main() {
+    service := micro.NewService(
+        micro.Name(&quot;go.micro.srv.example&quot;),
+    )
+
+    service.Init()
+
+    if err := service.Run(); err != nil {
+        log.Fatal(err)
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;上面的代码便可以启动一个微服务。接下来，我们便从经典三段入手，先讲解这三段背后各自隐藏的逻辑。&lt;/p&gt;
+
+&lt;h3 id=&quot;newservice&quot;&gt;NewService&lt;/h3&gt;
+
+&lt;p&gt;&lt;strong&gt;NewService&lt;/strong&gt;负责创建新服务。它的参数是&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/micro.go#L42&quot;&gt;&lt;strong&gt;micro.Option&lt;/strong&gt;&lt;/a&gt;函数数组，此类函数专用来装配启动参数或配置选项。&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func NewService(opts ...Option) Service {
+    return newService(opts...)
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;整个NewService有三个步骤：&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;a href=&quot;#1.初始化配置选项&quot;&gt;初始化配置选项&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;#2.包装客户端&quot;&gt;包装客户端&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;#3.组装服务&quot;&gt;组装服务&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://micro.mu/blog/cn/assets/images/go-micro-service.png&quot;&gt;
+  &lt;img src=&quot;https://micro.mu/blog/cn/assets/images/go-micro-service.png&quot; style=&quot;width: 100%; height: auto; margin: 0;&quot; /&gt;
+&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;参考上图，对2，3步骤可以有更好的理解。服务中有两个对象Client与Server，分别负责发送请求与接收请求。&lt;/p&gt;
+
+&lt;p&gt;构建Service服务核心代码：&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/service.go#L21-L34&quot;&gt;service.go&lt;/a&gt;&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func newService(opts ...Option) Service {
+    
+    // 初始化配置选项
+    options := newOptions(opts...)
+
+    // 包装客户端
+    options.Client = &amp;amp;clientWrapper{
+        options.Client,
+        metadata.Metadata{
+            HeaderPrefix + &quot;From-Service&quot;: options.Server.Options().Name,
+        },
+    }
+
+    // 组装服务
+    return &amp;amp;service{
+        opts: options,
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h4 id=&quot;1初始化配置选项&quot;&gt;1.初始化配置选项&lt;/h4&gt;
+
+&lt;p&gt;配置选项通过Option函数来传递&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/micro.go#L42&quot;&gt;&lt;strong&gt;Option&lt;/strong&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;type Option func(*Options)
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;我们就用&lt;strong&gt;micro.Name(“go.micro.srv.example”)&lt;/strong&gt;来说明&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/options.go#L133-L137&quot;&gt;options.go&lt;/a&gt;&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;// Name of the service
+func Name(n string) Option {
+    return func(o *Options) {
+        o.Server.Init(server.Name(n))
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;上述代码中接收服务名&lt;em&gt;n&lt;/em&gt;后即返回一个回参为Option的匿名函数。函数中的&lt;strong&gt;o.Server.Init(server.Name(n))&lt;/strong&gt;，我们这里不讲，大家只需要知道是服务的配置初始化逻辑，我们把它放到后面的专门讲解Server（包括：MockServer，RpcServer，HttpServer）的章节里讲解。&lt;/p&gt;
+
+&lt;p&gt;更多选项配置函数参考：&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/options.go&quot;&gt;options.go&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;在上面的&lt;strong&gt;newService&lt;/strong&gt;代码中，第一部分就是初始化传入的配置：&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func newService(opts ...Option) Service {
+    
+    // 初始化配置选项
+    options := newOptions(opts...)
+
+    // ...
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;我们再来看看&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/options.go#L36-L52&quot;&gt;&lt;strong&gt;newOptions&lt;/strong&gt;&lt;/a&gt;方法&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func newOptions(opts ...Option) Options {
+    opt := Options{
+        Broker:    broker.DefaultBroker,
+        Cmd:       cmd.DefaultCmd,
+        Client:    client.DefaultClient,
+        Server:    server.DefaultServer,
+        Registry:  registry.DefaultRegistry,
+        Transport: transport.DefaultTransport,
+        Context:   context.Background(),
+    }
+
+    for _, o := range opts {
+        o(&amp;amp;opt)
+    }
+
+    return opt
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;可见，初始化配置中，预置有基础组件默认配置。再调用&lt;strong&gt;opts&lt;/strong&gt;中传入的参数，逐个执行定制的配置函数。&lt;/p&gt;
+
+&lt;p&gt;Option函数的参数是Options，里面维护服务配置信息，比如注册、命令行信息等。&lt;/p&gt;
+
+&lt;p&gt;每个Option函数执行完后即返回配置对象Options。&lt;/p&gt;
+
+&lt;h4 id=&quot;2包装客户端&quot;&gt;2.包装客户端&lt;/h4&gt;
+
+&lt;p&gt;包装客户端在配置初始化之后，客户端由包装器&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/wrapper.go#L10-L13&quot;&gt;clientWrapper&lt;/a&gt;封装。&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func newService(opts ...Option) Service {
+    
+    options.Client = &amp;amp;clientWrapper{
+        options.Client,
+        metadata.Metadata{
+            HeaderPrefix + &quot;From-Service&quot;: options.Server.Options().Name,
+        },
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;包装器继承了客户端，并自带由元数据组成的头：&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/wrapper.go#L10-L13&quot;&gt;wrapper.go&lt;/a&gt;&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;type clientWrapper struct {
+    client.Client
+    headers metadata.Metadata
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;go-micro中的Client都有三个能力：&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;调用RPC Call&lt;/li&gt;
+  &lt;li&gt;流式请求 Stream&lt;/li&gt;
+  &lt;li&gt;广播消息 Publish&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func (c *clientWrapper) Call(ctx context.Context, req client.Request, rsp interface{}, opts ...client.CallOption) error {
+    ctx = c.setHeaders(ctx)
+    return c.Client.Call(ctx, req, rsp, opts...)
+}
+
+func (c *clientWrapper) Stream(ctx context.Context, req client.Request, opts ...client.CallOption) (client.Stream, error) {
+    ctx = c.setHeaders(ctx)
+    return c.Client.Stream(ctx, req, opts...)
+}
+
+func (c *clientWrapper) Publish(ctx context.Context, p client.Message, opts ...client.PublishOption) error {
+    ctx = c.setHeaders(ctx)
+    return c.Client.Publish(ctx, p, opts...)
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;其实Service中Client并没有过多改变原生Client行为，只是在其发送请求或广播前把元数据放到上下文中传向下游服务传递。见setHeaders：&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/wrapper.go#L15-L28&quot;&gt;&lt;strong&gt;setHeaders&lt;/strong&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func (c *clientWrapper) setHeaders(ctx context.Context) context.Context {
+   
+    // 复制元数据信息
+    mda, _ := metadata.FromContext(ctx)
+    md := metadata.Copy(mda)
+
+    // 预置头信息塞到元数据
+    for k, v := range c.headers {
+        if _, ok := md[k]; !ok {
+            md[k] = v
+        }
+    }
+
+    // 元数据塞到上下文中
+    return metadata.NewContext(ctx, md)
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h4 id=&quot;3组装服务&quot;&gt;3.组装服务&lt;/h4&gt;
+
+&lt;p&gt;&lt;strong&gt;Go-Micro&lt;/strong&gt;中的server非常简单&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;type service struct {
+    opts Options
+    once sync.Once
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;服务结构中只有配置项与单次锁。&lt;/p&gt;
+
+&lt;p&gt;以上就是service的构造过程。其最核心的地方便是&lt;a href=&quot;#1.初始化配置选项&quot;&gt;初始化配置选项&lt;/a&gt;、&lt;a href=&quot;#2.包装客户端&quot;&gt;包装客户端&lt;/a&gt;。本章的主要内容是介绍服务构建流程，所以不会深入讲解配置项，后面的章节会讲。&lt;/p&gt;
+
+&lt;h3 id=&quot;init&quot;&gt;Init&lt;/h3&gt;
+
+&lt;p&gt;初始化函数在构造服务之后，由服务调用，它的工作主要是再次渲染传入Init的Option配置项，然后再初始化命令行参数。&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func (s *service) Init(opts ...Option) {
+    // process options
+    for _, o := range opts {
+        o(&amp;amp;s.opts)
+    }
+
+    s.once.Do(func() {
+        // 初始化命令行参数，会覆盖的参数
+        _ = s.opts.Cmd.Init(
+            cmd.Broker(&amp;amp;s.opts.Broker),
+            cmd.Registry(&amp;amp;s.opts.Registry),
+            cmd.Transport(&amp;amp;s.opts.Transport),
+            cmd.Client(&amp;amp;s.opts.Client),
+            cmd.Server(&amp;amp;s.opts.Server),
+        )
+    })
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;由于在&lt;strong&gt;NewService&lt;/strong&gt;中加载过一次传入的配置项，而Init中如果有配置项传入，会改变之此前的值，故而，在&lt;strong&gt;Go-Micro&lt;/strong&gt;体系中，配置项的生效顺序由小到大依次是：&lt;strong&gt;默认值 &amp;lt; 硬编码值（随构造函数传入）&amp;lt; 命令行参数&lt;/strong&gt;。&lt;/p&gt;
+
+&lt;p&gt;我们再用&lt;strong&gt;micro.Name(“go.micro.srv.example”)&lt;/strong&gt;来说明，假设我们通过下列4种方式指定服务名：&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;默认值&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;service := micro.NewService()
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;随参传入&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;service := micro.NewService(
+        micro.Name(&quot;go.micro.api.new&quot;), 
+        )
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;随参传入 Init&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;service.Init(micro.Name(&quot;go.micro.api.init&quot;),)
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;命令行参数&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-bash&quot;&gt;go run main.go --server_name=go.micro.api.cmd
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;它们各自打印的服务名分别是：&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;server&lt;/li&gt;
+  &lt;li&gt;go.micro.api.new&lt;/li&gt;
+  &lt;li&gt;go.micro.api.init&lt;/li&gt;
+  &lt;li&gt;go.micro.api.cmd&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;strong&gt;Init&lt;/strong&gt;函数的本质是&lt;u&gt;再次加载配置，并确保权重最高的命令行参数生效&lt;/u&gt;。&lt;/p&gt;
+
+&lt;h3 id=&quot;run&quot;&gt;Run&lt;/h3&gt;
+
+&lt;p&gt;在服务构造与初始化完成后，便可以执行&lt;strong&gt;Run&lt;/strong&gt;函数，它负责新增协程把服务启动（Start），然后通过select指令阻塞并侦听相关的关闭信号，随后执行关闭程序。&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/service.go#L115-L131&quot;&gt;&lt;strong&gt;Run&lt;/strong&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func (s *service) Run() error {
+    
+    // 启动服务
+    if err := s.Start(); err != nil {
+        return err
+    }
+
+    ch := make(chan os.Signal, 1)
+    signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+
+    select {
+    // 侦听kill信号
+    case &amp;lt;-ch:
+    // 侦听上下文关闭信号
+    case &amp;lt;-s.opts.Context.Done():
+    }
+
+    return s.Stop()
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;在上述代码中我们看到，服务启动后由&lt;strong&gt;signal.Notify&lt;/strong&gt;方法将三个信号量绑定到信道上：&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;syscall.SIGTERM 结束进程&lt;/li&gt;
+  &lt;li&gt;syscall.SIGINT  ctrl + c&lt;/li&gt;
+  &lt;li&gt;syscall.SIGQUIT ctrl + \&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;题外，类Unix标准系统中，只有如下几个信号绑定了键盘&lt;/p&gt;
+
+&lt;blockquote&gt;
+  &lt;p&gt;SIGHUP、SIGINT、SIGTTOU、SIGTTIN、SIGQUIT、SIGTSTP&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;h4 id=&quot;服务启动&quot;&gt;服务启动&lt;/h4&gt;
+
+&lt;p&gt;服务的启动由&lt;strong&gt;Run&lt;/strong&gt;函数中的启动方法&lt;strong&gt;Start&lt;/strong&gt;完成&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func (s *service) Run() error {
+    
+    // 启动服务
+    if err := s.Start(); err != nil {
+        return err
+    }
+
+    // ...
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://github.com/micro/go-micro/blob/master/service.go#L73-L91&quot;&gt;&lt;strong&gt;Start&lt;/strong&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func (s *service) Start() error {
+    
+    // 启动勾子
+    for _, fn := range s.opts.BeforeStart {
+        if err := fn(); err != nil {
+            return err
+        }
+    }
+
+    if err := s.opts.Server.Start(); err != nil {
+        return err
+    }
+
+    // 启动完成勾子
+    for _, fn := range s.opts.AfterStart {
+        if err := fn(); err != nil {
+            return err
+        }
+    }
+
+    return nil
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h4 id=&quot;启动勾子&quot;&gt;启动勾子&lt;/h4&gt;
+
+&lt;p&gt;启动函数Start中前后各有启动开始和结束两个勾子选项，可以在NewService或Init中将其传入：&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;    service.Init(
+        micro.BeforeStart(func() error {
+            log.Log(1)
+            return nil
+        }),
+        micro.BeforeStart(func() error {
+            log.Log(2)
+            return nil
+        }),
+        micro.BeforeStop(func() error {
+            return nil
+        }),
+    )
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;需要多个就传入多个，在渲染配置时会将它们附加到指定启动函数数组中：&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func BeforeStart(fn func() error) Option {
+    return func(o *Options) {
+        // 有多个则会附加进去
+        o.BeforeStart = append(o.BeforeStart, fn)
+    }
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;h4 id=&quot;服务启动-1&quot;&gt;服务启动&lt;/h4&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func (s *service) Start() error {
+    
+    // ...
+
+    if err := s.opts.Server.Start(); err != nil {
+        return err
+    }
+
+
+    // ...
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;服务启动是通过在配置项的中的Server对象的&lt;strong&gt;Start&lt;/strong&gt;方法触发。&lt;/p&gt;
+
+&lt;p&gt;整个&lt;strong&gt;Start&lt;/strong&gt;分为以下几个步骤&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;注册调试接口endpoint，Debug.{Method}&lt;/li&gt;
+  &lt;li&gt;transport 分配地址&lt;/li&gt;
+  &lt;li&gt;broker 分配地址并连接&lt;/li&gt;
+  &lt;li&gt;register 注册&lt;/li&gt;
+  &lt;li&gt;侦听连接请求与关闭信号&lt;/li&gt;
+  &lt;li&gt;循环保活&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;我们来看关键代码（删除了部分逻辑，增加注释）&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-go&quot;&gt;func (s *rpcServer) Start() error {
+    
+    // 1. 注册调试接口endpoint，Debug.{Method}
+    registerDebugHandler(s)
+    config := s.Options()
+
+    // 2. transport 分配地址
+    ts, err := config.Transport.Listen(config.Address)
+    if err != nil {
+        return err
+    }
+
+    // 默认端口是0，意味着会随机分配，但是我们需要反填随机端口，以让请求能够到达
+    s.Lock()
+    addr := s.opts.Address
+    s.opts.Address = ts.Addr()
+    s.Unlock()
+
+    // 3. broker 分配地址并连接
+    if err := config.Broker.Connect(); err != nil {
+        return err
+    }
+
+  
+    // 4. register 注册
+    if err := s.Register(); err != nil {
+        log.Log(&quot;Server register error: &quot;, err)
+    }
+
+    exit := make(chan bool)
+
+    // 新协程侦听请求与关闭信号
+    go func() {
+        for {
+            // listen for connections
+            err := ts.Accept(s.ServeConn)
+
+            select {
+            // check if we're supposed to exit
+            case &amp;lt;-exit:
+                return
+            // check the error and backoff
+            default:
+                if err != nil {
+                    log.Logf(&quot;Accept error: %v&quot;, err)
+                    time.Sleep(time.Second)
+                    continue
+                }
+            }
+
+            // no error just exit
+            return
+        }
+    }()
+
+    // 6. 循环保活
+    go func() {
+        t := new(time.Ticker)
+
+        // only process if it exists
+        if s.opts.RegisterInterval &amp;gt; time.Duration(0) {
+            // new ticker
+            t = time.NewTicker(s.opts.RegisterInterval)
+        }
+
+        // return error chan
+        var ch chan error
+
+    Loop:
+        for {
+            select {
+            // 重新注册，保持节点在线
+            case &amp;lt;-t.C:
+                if err := s.Register(); err != nil {
+                    log.Log(&quot;Server register error: &quot;, err)
+                }
+            // 侦听退出信号
+            case ch = &amp;lt;-s.exit:
+                t.Stop()
+                close(exit)
+                break Loop
+            }
+        }
+
+        // 退出后往注册中心卸载节点
+        if err := s.Deregister(); err != nil {
+            log.Log(&quot;Server deregister error: &quot;, err)
+        }
+
+        // 等待所有请求都返回
+        if wait(s.opts.Context) {
+            s.wg.Wait()
+        }
+
+        // 关闭侦听
+        ch &amp;lt;- ts.Close()
+
+        // 关闭broker
+        config.Broker.Disconnect()
+
+        // 归还原始值，不重要，只是为了回归原始
+        s.Lock()
+        s.opts.Address = addr
+        s.Unlock()
+    }()
+
+    return nil
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;我们在代码中注释了具体过程。但是其中非常重要的环节，比如register注册、broker连接等我们不深入讲解，会放到其实章节中演示，这也是为了让本章主题更向服务构建与启动靠拢。&lt;/p&gt;
+
+&lt;h2 id=&quot;总结&quot;&gt;总结&lt;/h2&gt;
+
+&lt;p&gt;我们在这一章节中讲了&lt;strong&gt;Go-Micro&lt;/strong&gt;服务是如何构造与启动的，下一章我们会讲解micro服务的注册是如何实现的。&lt;/p&gt;
+
+&lt;h2 id=&quot;micro源码系列&quot;&gt;Micro源码系列&lt;/h2&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;&lt;a href=&quot;https://micro.mu/blog/cn/2019/05/23/how-does-go-micro-server-be-bulit.html&quot;&gt;Go-Micro服务的构造过程&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://micro.mu/blog/cn/2019/06/01/how-does-go-micro-register-services.html&quot;&gt;Go-Micro注册解读&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;[Go-Micro客户端解读（in progress）]&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;h2 id=&quot;micro-中文资源&quot;&gt;Micro 中文资源&lt;/h2&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;&lt;a href=&quot;https://github.com/micro-in-cn/all-in-one&quot;&gt;中文示例集&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://github.com/micro-in-cn/tutorials&quot;&gt;中文教程&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://micro.mu/blog/cn&quot;&gt;中文博客&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://github.com/micro-in-cn/platform-web&quot;&gt;Micro服务治理控制台&lt;/a&gt;&lt;/li&gt;
+&lt;/ol&gt;
+</description>
+        <pubDate>Thu, 23 May 2019 10:00:00 +0100</pubDate>
+        <link>https://micro.mu//blog/cn/2019/05/23/how-does-go-micro-server-be-bulit.html</link>
+        <guid isPermaLink="true">https://micro.mu//blog/cn/2019/05/23/how-does-go-micro-server-be-bulit.html</guid>
+        
+        
+      </item>
+    
+      <item>
+        <title>Micro 1.0.0 release and beyond</title>
+        <description>&lt;p&gt;&lt;br /&gt;
+在过去的四年里，我们花了大量精力简化微服务的开发。为了达到这个目标，我们推出了&lt;a href=&quot;https://github.com/micro/go-micro&quot;&gt;&lt;strong&gt;Go Micro&lt;/strong&gt;&lt;/a&gt;框架及基于&lt;strong&gt;Go Micro&lt;/strong&gt;的服务治理工具集&lt;a href=&quot;https://github.com/micro/micro&quot;&gt;&lt;strong&gt;Micro&lt;/strong&gt;&lt;/a&gt;。&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;https://micro.mu/docs/images/go-micro.svg&quot; style=&quot;max-width: 100%; margin: 0;&quot; /&gt;&lt;/p&gt;
+
+&lt;h2 id=&quot;版本-100&quot;&gt;版本 1.0.0&lt;/h2&gt;
+
+&lt;p&gt;上个月我们发布了&lt;strong&gt;Go Micro&lt;/strong&gt;与&lt;strong&gt;Micro&lt;/strong&gt;&lt;strong&gt;version 1.0.0&lt;/strong&gt;。在Micro发展历程中，这是非常重要的里程碑。从2015年开始，Micro就在很多公司中真实项目上运行，并且变得越来越重要，比如Micro的捐献商德国在线租车平台Sixt，它们产线上有几百个微服务。&lt;/p&gt;
+
+&lt;p&gt;开发团队可以通过Micro将复杂的分布式与云端应用的抽象化，把它们构建成弹性的微服务。Micro插件化、对运行环境零依赖。&lt;/p&gt;
+
+&lt;center&gt;
+&lt;img src=&quot;https://micro.mu/micro-diag.svg&quot; style=&quot;max-width: 100%; margin: 0;&quot; /&gt;
+&lt;/center&gt;
+
+&lt;p&gt;&lt;br /&gt;
+We’ve considered Micro production ready for a long time but the release of 1.0.0 solidifies the maturity and stability of our tooling. And 
+we believe it’s the right time for everyone to adopt Micro as the defacto standard for microservice development.&lt;/p&gt;
+
+&lt;h2 id=&quot;使用情况&quot;&gt;使用情况&lt;/h2&gt;
+
+&lt;p&gt;Micro在合理成长has largely grown organically. We’ve not yet actively engaged in speaking at conferences, meetups or any other form of outreach. Instead 
+we focused on solving a real problem and it’s shown in the numbers.&lt;/p&gt;
+
+&lt;center&gt;
+&lt;img src=&quot;/blog/cn/assets/images/stars.png&quot; style=&quot;max-width: 75%; margin: 0;&quot; /&gt;
+&lt;/center&gt;
+&lt;p&gt;&lt;br /&gt;
+跟踪大家的使用情况目前比较困难，但是我们通过在论坛中看到了大家的共呜与反馈，我们很清楚大家希望在Golang体系有一个更简单构建微服务的方式。&lt;/p&gt;
+
+&lt;h2 id=&quot;10之后的规则&quot;&gt;1.0之后的规则&lt;/h2&gt;
+
+&lt;p&gt;我们宣告1.0.0版本发布并不只是说发布稳定版、或者可以在产线中运行，也更意味着当前版本不会受未来变动API影响。This now also allows us to take stock of all the learnings of Micro’s usage of the past 4 
+years, how technology has evolved in the industry and what version 2 might start to look like.&lt;/p&gt;
+
+&lt;p&gt;Micro刚启动的时候，k8s也只是才进入孵化期，而gRPC才发布不久。现在新的技术或者理念比如service-mesh等等又冒了出来。&lt;/p&gt;
+
+&lt;p&gt;因为Micro是插件化的，更简化的顶层抽象，使得其比较容易面对开发者技术选型。2.0版本Micro会提供更多无缝集成和丝滑的体验。&lt;/p&gt;
+
+&lt;p&gt;Some of these ideas will revolve around using gRPC by default, allowing a drop-in experience on kubernetes and potentially a runtime 
+for those who don’t want to deal with the complexity of cloud-native systems or any dependency management at all.&lt;/p&gt;
+
+&lt;p&gt;We’ll also be thinking about how to move beyond Go to support multiple languages.&lt;/p&gt;
+
+&lt;h2 id=&quot;collaboration&quot;&gt;Collaboration&lt;/h2&gt;
+
+&lt;p&gt;Slack has served us well for realtime collaboration but we need a medium aligned with open source to push this much further, to be far more inclusive 
+and to provide a historic record for newcomers to explore easily.&lt;/p&gt;
+
+&lt;p&gt;We’re going to work with the community by using GitHub to create an open source location to share ideas, discussion and the roadmap for the 
+&lt;a href=&quot;https://github.com/micro/development&quot;&gt;&lt;strong&gt;Development&lt;/strong&gt;&lt;/a&gt; of features for 2.0 and beyond.&lt;/p&gt;
+
+&lt;p&gt;To all those interested in contributing and collaboration, create an issue for feature requests, a pull request to share design ideas and we’ll work 
+together to shape the roadmap.&lt;/p&gt;
+
+&lt;h2 id=&quot;鸣谢&quot;&gt;鸣谢&lt;/h2&gt;
+
+&lt;p&gt;我想在最后向Micro社区还有使用Micro、支持Micro的人们说声感谢，谢谢大家这4年来的支持。这段时间走得很艰难，不过好在困难都是值得的，而且我们还有很多事要做。没有社区就没有现在的Micro。 We’re 1.6k+ members 
+strong in Slack with thousands more across other forums.&lt;/p&gt;
+
+&lt;center&gt;
+&lt;blockquote class=&quot;twitter-tweet&quot; data-cards=&quot;hidden&quot; data-lang=&quot;en&quot;&gt;&lt;p lang=&quot;en&quot; dir=&quot;ltr&quot;&gt;Today I released v1 of micro and go-micro. 4 years of hard work. Thanks to all that supported me along the way. &lt;a href=&quot;https://t.co/blI1pJ3hBl&quot;&gt;https://t.co/blI1pJ3hBl&lt;/a&gt;&lt;/p&gt;&amp;mdash; Asim Aslam (@chuhnk) &lt;a href=&quot;https://twitter.com/chuhnk/status/1102992210088378369?ref_src=twsrc%5Etfw&quot;&gt;March 5, 2019&lt;/a&gt;&lt;/blockquote&gt;
+&lt;script async=&quot;&quot; src=&quot;https://platform.twitter.com/widgets.js&quot; charset=&quot;utf-8&quot;&gt;&lt;/script&gt;
+&lt;/center&gt;
+&lt;p&gt;&lt;br /&gt;
+Thank you for all your support and contributions. We hope we can return the favour by providing everyone the most inclusive and collaborative 
+place for all things microservices.&lt;/p&gt;
+
+&lt;center&gt;...&lt;/center&gt;
+&lt;p&gt;&lt;br /&gt;
+Micro始终坚持极简构建微服务的理念。如果你也在想微服务开发，那就上车吧。&lt;/p&gt;
+
+&lt;p&gt;访问我们的网站了解更多，&lt;a href=&quot;https://micro.mu&quot;&gt;micro.mu&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;关注我们：&lt;a href=&quot;https://twitter.com/microhq&quot;&gt;twitter&lt;/a&gt;，&lt;a href=&quot;https://weibo.com/microhq&quot;&gt;微博&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;讨论：&lt;a href=&quot;https://micro-services.slack.com&quot;&gt;slack&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;线下：&lt;a href=&quot;https://www.meetup.com/Micro-Services-Network/&quot;&gt;meetup&lt;/a&gt;&lt;/p&gt;
+
+&lt;h6&gt;&lt;a href=&quot;https://github.com/micro/micro&quot;&gt;&lt;i class=&quot;fa fa-github fa-2x&quot;&gt;&lt;/i&gt; Micro&lt;/a&gt;&lt;/h6&gt;
+</description>
+        <pubDate>Mon, 01 Apr 2019 10:00:00 +0100</pubDate>
+        <link>https://micro.mu//blog/cn/2019/04/01/micro-version-1-and-beyond.html</link>
+        <guid isPermaLink="true">https://micro.mu//blog/cn/2019/04/01/micro-version-1-and-beyond.html</guid>
+        
+        
+      </item>
+    
+      <item>
+        <title>Consul Connect-Native Go Micro Services</title>
+        <description>&lt;p&gt;&lt;br /&gt;
+Today we’re announcing support for Connect-Native Go Micro services via a slim initialisation library called &lt;a href=&quot;https://github.com/micro/go-proxy&quot;&gt;Go Proxy&lt;/a&gt;. 
+This will provide &lt;a href=&quot;https://github.com/micro/go-micro&quot;&gt;Go Micro&lt;/a&gt; with the ability to do authorized and secure service-to-service communication.&lt;/p&gt;
+
+&lt;h2 id=&quot;what-is-consul-connect&quot;&gt;What is Consul Connect?&lt;/h2&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://www.consul.io/docs/connect/index.html&quot;&gt;Consul Connect&lt;/a&gt; is a feature of &lt;a href=&quot;https://www.consul.io/&quot;&gt;Consul&lt;/a&gt; which provides 
+service-to-service authorization and encryption via mutual TLS. Consul Connect uses &lt;a href=&quot;https://spiffe.io/&quot;&gt;SPIFEE&lt;/a&gt; compliant 
+certificates for identity.&lt;/p&gt;
+
+&lt;p&gt;We believe Consul Connect is a powerful mechanism for securing micro services. So how do we integrate?&lt;/p&gt;
+
+&lt;h2 id=&quot;connect-native&quot;&gt;Connect-Native&lt;/h2&gt;
+
+&lt;p&gt;Consul &lt;a href=&quot;https://www.consul.io/docs/connect/native.html&quot;&gt;Connect-Native&lt;/a&gt; is native integration with the Connect API. This allows 
+&lt;a href=&quot;https://github.com/micro/go-micro&quot;&gt;Go Micro&lt;/a&gt; services to become secure by default.&lt;/p&gt;
+
+&lt;p&gt;Consul Connect provides the ability to use proxies for communication but this can add overhead, Go Micro handles distributed 
+systems concerns as a client library, which eliminates this overhead. Native integration with Connect gives us all its benefits 
+while maintaining direct point to point connections for performance.&lt;/p&gt;
+
+&lt;p&gt;The consul documentation provides an overview of how this works. In Go Micro’s case we initialise a consul registry with the 
+connect option enabled and setup the broker and transport tls config.&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;https://www.consul.io/assets/images/connect-native-overview-cc9dc497.png&quot; /&gt;&lt;/p&gt;
+
+&lt;h2 id=&quot;using-connect-native&quot;&gt;Using Connect-Native&lt;/h2&gt;
+
+&lt;p&gt;We’ve provided a complete example of how to get started in the &lt;a href=&quot;https://github.com/micro/go-proxy&quot;&gt;Go Proxy&lt;/a&gt; repository.&lt;/p&gt;
+
+&lt;p&gt;But essentially it’s a two line change. Import the connect package and create a new service with it. That’s it!&lt;/p&gt;
+
+&lt;script src=&quot;https://gist.github.com/asim/de7a3bcfcd93f6102e6c657ed54b8f2e.js&quot;&gt;&lt;/script&gt;
+
+&lt;h2 id=&quot;summary&quot;&gt;Summary&lt;/h2&gt;
+
+&lt;p&gt;Connect-Native gives us support for authorization and secure end to end communication for Go Micro apps without the overhead 
+of proxies. It’s a great addition for micro users and we highly recommend using it.&lt;/p&gt;
+
+&lt;center&gt;...&lt;/center&gt;
+
+&lt;p&gt;To learn more about micro check out the &lt;a href=&quot;https://micro.mu&quot;&gt;website&lt;/a&gt;, follow us on &lt;a href=&quot;https://twitter.com/microhq&quot;&gt;twitter&lt;/a&gt; or 
+join the &lt;a href=&quot;https://micro-services.slack.com&quot;&gt;slack&lt;/a&gt; community.&lt;/p&gt;
+
+&lt;h6&gt;&lt;a href=&quot;https://github.com/micro/go-proxy&quot;&gt;&lt;i class=&quot;fa fa-github fa-2x&quot;&gt;&lt;/i&gt; Go Proxy&lt;/a&gt;&lt;/h6&gt;
+</description>
+        <pubDate>Thu, 29 Nov 2018 09:00:00 +0000</pubDate>
+        <link>https://micro.mu//blog/cn/2018/11/29/connect-native.html</link>
+        <guid isPermaLink="true">https://micro.mu//blog/cn/2018/11/29/connect-native.html</guid>
+        
+        
+      </item>
+    
+      <item>
+        <title>The Micro Newsletter</title>
+        <description>&lt;p&gt;&lt;br /&gt;
+Hey, we’re starting a newsletter! Micro provides an opinionated view on how to build cloud-native systems but we want to provide 
+opinions beyond the micro ecosystem too.&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://micro.mu/#newsletter&quot;&gt;The micro newsletter&lt;/a&gt; is an opinionated summary of all things cloud-native. Every so often we’ll send out an email with a few 
+links to the most interesting cloud-native related content. This may include news, articles, videos, etc.&lt;/p&gt;
+
+&lt;p&gt;We’ll also share some of our opinions on each piece of content so you can through the noise and get some concise thoughts 
+to help you understand what’s going on.&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/blog/cn/assets/images/newsletter.png&quot; style=&quot;width: 100%; margin: 0 auto;&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;We’ve already sent out two newsletters and the response has been very positive so far. While we started with the idea of a weekly newsletter, 
+we’ll likely only send you content when there’s something interesting to talk about.&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://micro.mu/#newsletter&quot;&gt;Subscribe&lt;/a&gt; if you’re interested in hearing from us.&lt;/p&gt;
+
+&lt;center&gt;&lt;p&gt;...&lt;/p&gt;&lt;/center&gt;
+
+&lt;p&gt;If you want to learn more about micro, checkout the &lt;a href=&quot;https://micro.mu&quot;&gt;website&lt;/a&gt; or 
+visit &lt;a href=&quot;https://github.com/micro/micro&quot;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Follow us on &lt;a href=&quot;https://twitter.com/microhq&quot;&gt;Twitter&lt;/a&gt; or join the &lt;a href=&quot;http://slack.micro.mu&quot;&gt;Slack&lt;/a&gt; community.&lt;/p&gt;
+
+</description>
+        <pubDate>Sat, 07 Jul 2018 10:00:00 +0100</pubDate>
+        <link>https://micro.mu//blog/cn/2018/07/07/the-micro-newsletter.html</link>
+        <guid isPermaLink="true">https://micro.mu//blog/cn/2018/07/07/the-micro-newsletter.html</guid>
+        
+        
+      </item>
+    
+      <item>
+        <title>Go Config - A pluggable config framework</title>
+        <description>&lt;p&gt;&lt;br /&gt;
+Application configuration has remained largely static for most of our lifetime, using flags, environment variables and files. 
+Any change has usually required restarting the application or significant complexity in code to signal and reload the config.&lt;/p&gt;
+
+&lt;p&gt;Today though, we need more. Restarting an application for a minor configuration seems like overkill. If only one property 
+needs to change, should there not be a better way? Dynamic configuration provides us this option.&lt;/p&gt;
+
+&lt;h3 id=&quot;dynamic-config&quot;&gt;Dynamic Config&lt;/h3&gt;
+
+&lt;p&gt;Dynamic configuration is the concept by which a system can be modified or extended while it’s running. Or in simpler terms 
+the values you require for configuration are automatically updated as they change.&lt;/p&gt;
+
+&lt;p&gt;There’s an emergence of tooling for dynamic config mostly driven by key-value stores as the source of truth. Yet when we then 
+need to extract out these values it requires reading individual keys, extracting bytes and handling decoding manually.&lt;/p&gt;
+
+&lt;p&gt;In an ideal world, the configuration system should handle all of these concerns leaving you to focus on what’s most important. 
+Your code.&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://github.com/micro/go-config&quot;&gt;&lt;strong&gt;Go Config&lt;/strong&gt;&lt;/a&gt; is a pluggable config framework which looks to solve these problems.&lt;/p&gt;
+
+&lt;h3 id=&quot;go-config&quot;&gt;Go Config&lt;/h3&gt;
+
+&lt;p&gt;Go Config was born out of a need to simplify configuration for users of micro. Once companies had started building real 
+products that were going to production they echoed the need for the ability to provide configuration for business logic 
+related code or higher level config that shouldn’t really necessitate the need for a restart.&lt;/p&gt;
+
+&lt;p&gt;In some cases they had opted for the kubernetes config map or a key-value store such as consul or etcd but handling 
+this configuration in code was not pleasant. They were looking for abstractions similar to Go Micro for their config.&lt;/p&gt;
+
+&lt;p&gt;And so Go Config was created to help with this and much more.&lt;/p&gt;
+
+&lt;p&gt;Go Config is:&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;strong&gt;Dynamic&lt;/strong&gt; - Config is updated transparently in the background&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;Pluggable&lt;/strong&gt; - Backend sources can be swapped out&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;Mergeable&lt;/strong&gt; - Multiple sources are merged into a single source of truth&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;Observable&lt;/strong&gt; - Actively watch the config for changes if you need&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;Safe&lt;/strong&gt; - Default fallback values can be specified in case they don’t exist&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;It also has the benefit of supporting multiple backend sources and config encoding formats out of the box. See the project 
+&lt;a href=&quot;https://github.com/micro/go-config&quot;&gt;readme&lt;/a&gt; for details.&lt;/p&gt;
+
+&lt;p&gt;Here’s the top level interface which encapsulates all the features mentioned.&lt;/p&gt;
+
+&lt;script src=&quot;https://gist.github.com/asim/9365ffa1115d2215a39d9073a2fa0ffc.js&quot;&gt;&lt;/script&gt;
+
+&lt;p&gt;Ok so let’s break it down and discuss the various concerns in the framework starting with the backend sources.&lt;/p&gt;
+
+&lt;h3 id=&quot;source&quot;&gt;Source&lt;/h3&gt;
+
+&lt;p&gt;A source is a backend from which config is loaded. This could be command line flags, environment variables, a key-value store 
+or any other number of places.&lt;/p&gt;
+
+&lt;p&gt;Go Config provides a simple abstraction over all these sources as a simple interface from which we read data or what we call a ChangeSet.&lt;/p&gt;
+
+&lt;script src=&quot;https://gist.github.com/asim/45a0c1f0a40c29c034b1aea796a24c96.js&quot;&gt;&lt;/script&gt;
+
+&lt;p&gt;The ChangeSet includes the raw data, it’s format, timestamp of creation or last update and the source from which it was loaded. 
+There’s also an optional md5 checksum which can be recalculated using the &lt;code&gt;Sum()&lt;/code&gt; method.&lt;/p&gt;
+
+&lt;p&gt;The simplicity of this interface allows us to easily create a source for any backend, read it’s values at any given time or 
+watch for changes where possible.&lt;/p&gt;
+
+&lt;h3 id=&quot;encoding&quot;&gt;Encoding&lt;/h3&gt;
+
+&lt;p&gt;Config is rarely available in just a single format and people usually have varying preferences on whether it should be stored 
+in json, yaml, toml or something else. We make sure to deal with this in the framework so almost any encoding format can be 
+dealt with.&lt;/p&gt;
+
+&lt;p&gt;The encoder is a very simply interface for handling encoding and decoding different formats. Why wouldn’t we reuse existing libraries for 
+this? We do beneath the covers but to ensure we could deal with encoding in an abstract way it made sense to define an interface for it.&lt;/p&gt;
+
+&lt;script src=&quot;https://gist.github.com/asim/131349521cbb974c680cd3a245bf13c7.js&quot;&gt;&lt;/script&gt;
+
+&lt;p&gt;The current supported formats are json, yaml, toml, xml and hcl.&lt;/p&gt;
+
+&lt;h3 id=&quot;reader&quot;&gt;Reader&lt;/h3&gt;
+
+&lt;p&gt;Once we’ve loaded backend sources and developed a way to decode the variety of config formats we need some way of actually internally 
+representing and reading it. For this we’ve created a reader.&lt;/p&gt;
+
+&lt;p&gt;The reader manages decoding and merging multiple changesets into a single source of truth. It then provides a value interface which 
+allows you to retrieve native Go types or scan the config into a type of your choosing.&lt;/p&gt;
+
+&lt;script src=&quot;https://gist.github.com/asim/e19799834382975b85e1c1813c4e2f89.js&quot;&gt;&lt;/script&gt;
+
+&lt;p&gt;Our default internal representation for the merged source is json.&lt;/p&gt;
+
+&lt;h3 id=&quot;example&quot;&gt;Example&lt;/h3&gt;
+
+&lt;p&gt;Let’s look at how Go Config actually works in code. Starting with a simple example, let’s read config from a file.&lt;/p&gt;
+
+&lt;h4 id=&quot;read-config&quot;&gt;Read Config&lt;/h4&gt;
+
+&lt;p&gt;Step 1. Define a config.json file&lt;/p&gt;
+
+&lt;script src=&quot;https://gist.github.com/asim/f6ddc55133f54f32fe0e9e6813e286dc.js&quot;&gt;&lt;/script&gt;
+
+&lt;p&gt;Step 2. Load the file into config&lt;/p&gt;
+
+&lt;script src=&quot;https://gist.github.com/asim/716a352d1f2d071fbf14a4fae39fc692.js&quot;&gt;&lt;/script&gt;
+
+&lt;p&gt;Step 3. Read the values from config&lt;/p&gt;
+
+&lt;script src=&quot;https://gist.github.com/asim/d97fe7bd2d16b125c721808e693ba88b.js&quot;&gt;&lt;/script&gt;
+
+&lt;p&gt;And that’s it! It’s really that simple.&lt;/p&gt;
+
+&lt;h4 id=&quot;watch-config&quot;&gt;Watch Config&lt;/h4&gt;
+
+&lt;p&gt;If the config file changes, the next time you read the value it will be different. But what if you want to 
+track that change? You can watch for changes. Let’s test it out.&lt;/p&gt;
+
+&lt;script src=&quot;https://gist.github.com/asim/d7b98889aaf0342f99c0360641907bc0.js&quot;&gt;&lt;/script&gt;
+
+&lt;p&gt;In this example rather than getting a value, we watch it. The next time the value changes we’ll receive it and 
+can update our Host struct.&lt;/p&gt;
+
+&lt;h4 id=&quot;merge-config&quot;&gt;Merge Config&lt;/h4&gt;
+
+&lt;p&gt;Another useful feature is the ability to load config from multiple sources which are ordered, merged and overridden.
+A good example of this would be loading config from a file but overriding via environment variables or flags.&lt;/p&gt;
+
+&lt;script src=&quot;https://gist.github.com/asim/e91071c4eaff6e0a081ea43a9cdcf7da.js&quot;&gt;&lt;/script&gt;
+
+&lt;h4 id=&quot;fallback-values&quot;&gt;Fallback Values&lt;/h4&gt;
+
+&lt;p&gt;In the event some values may not exist or config does not load due to an error, you can set fallback values at 
+time of getting them.&lt;/p&gt;
+
+&lt;script src=&quot;https://gist.github.com/asim/fbfef8fcfe16cb252377fae821c03a2e.js&quot;&gt;&lt;/script&gt;
+
+&lt;h3 id=&quot;summary&quot;&gt;Summary&lt;/h3&gt;
+
+&lt;p&gt;The way in which config is managed and consumed needs to evolve. Go Config looks to do this by drastically simplifying 
+use of dynamic configuration with a pluggable framework.&lt;/p&gt;
+
+&lt;p&gt;Go Config currently supports a number of configuration formats and backend sources but we’re always looking for 
+more contributions. If you’re interested in contribution please feel free to do so by with a pull request.&lt;/p&gt;
+
+&lt;p&gt;Let Go Config managed the complexity of configuration for you so you can focus on what’s really important. Your code.&lt;/p&gt;
+
+&lt;p&gt;To learn more about micro check out the &lt;a href=&quot;https://micro.mu&quot;&gt;website&lt;/a&gt;, follow us on &lt;a href=&quot;https://twitter.com/microhq&quot;&gt;twitter&lt;/a&gt; or 
+join the &lt;a href=&quot;https://micro-services.slack.com&quot;&gt;slack&lt;/a&gt; community.&lt;/p&gt;
+
+&lt;h6&gt;&lt;a href=&quot;https://github.com/micro/go-config&quot;&gt;&lt;i class=&quot;fa fa-github fa-2x&quot;&gt;&lt;/i&gt; Go Config&lt;/a&gt;&lt;/h6&gt;
+</description>
+        <pubDate>Wed, 04 Jul 2018 10:00:00 +0100</pubDate>
+        <link>https://micro.mu//blog/cn/2018/07/04/go-config.html</link>
+        <guid isPermaLink="true">https://micro.mu//blog/cn/2018/07/04/go-config.html</guid>
+        
+        
+      </item>
+    
+      <item>
+        <title>Micro on Patreon</title>
+        <description>&lt;p&gt;&lt;br /&gt;
+The open source development of micro can now be sponsored via &lt;a href=&quot;https://www.patreon.com/microhq&quot;&gt;Patreon&lt;/a&gt;. Before we 
+go into the details, I want to first mention what micro is and it’s funding journey.&lt;/p&gt;
+
+&lt;p&gt;Micro is an open source project with the mission of simplifying cloud-native development. Technology is rapidly evolving. 
+Cloud computing gives us unlimited scale but leveraging that scale with existing tools is still difficult.&lt;/p&gt;
+
+&lt;p&gt;Micro is solving this problem with a developer first focus. The project provides an opinionated set of tools that abstract 
+away the complexities and details of infrastructure so you can focus on what’s really important.&lt;/p&gt;
+
+&lt;h2 id=&quot;in-the-beginning&quot;&gt;In The Beginning&lt;/h2&gt;
+
+&lt;p&gt;The project was created just over 3 years ago. At the end of 2014, after spending time building distributed systems 
+tools at Google and Hailo, it was clear there was immense value in their tools but they would never be open sourced.&lt;/p&gt;
+
+&lt;p&gt;As with most companies 
+these technology stacks were built for the organisation themselves and contained org specific references or assumptions about the 
+infrastructure deeply embedded within the code.&lt;/p&gt;
+
+&lt;p&gt;To open source that code would have been a measurable effort. As we’ve now seen, Google and the like have chosen to 
+implement new projects from the ground up with the intention of being open source first.&lt;/p&gt;
+
+&lt;p&gt;Back in 2014 though, this had yet to happen and I saw the need for a runtime agnostic set of tools focused on abstracting 
+away the details of distributed systems with an opinionated interface for developers.&lt;/p&gt;
+
+&lt;p&gt;This is what led to the creation of micro.&lt;/p&gt;
+
+&lt;h2 id=&quot;venture-funding&quot;&gt;Venture Funding&lt;/h2&gt;
+
+&lt;p&gt;In early 2015 I knew I wanted to pursue micro full time and being at a VC backed company led me to believe the best way 
+to do that would be to try raise money from venture capitalists.&lt;/p&gt;
+
+&lt;p&gt;I spent a number of months pursuing this effort with little to show for it. The combination of my lack of experience, traction 
+and location made it difficult to convince investors this was a venture worth pursuing.&lt;/p&gt;
+
+&lt;p&gt;VC funding was not in the cards for micro.&lt;/p&gt;
+
+&lt;h2 id=&quot;self-funding&quot;&gt;Self Funding&lt;/h2&gt;
+
+&lt;p&gt;In mid 2015 micro was an open source project like many others on GitHub, with little traction and no production use. 
+It wasn’t clear then if it would ever go beyond being just another OSS project on GitHub.&lt;/p&gt;
+
+&lt;p&gt;At that point I decided going back to work was the right move. It was however short lived, as a couple months later 
+developers started to show interest in using the project at work. This was enough to convince me I needed to focus my efforts 
+on micro full time.&lt;/p&gt;
+
+&lt;p&gt;From late 2015 onwards, I self funded micro’s open source journey, with the hope of finding a more sustainable approach later.&lt;/p&gt;
+
+&lt;h2 id=&quot;enterprise-sponsorship&quot;&gt;Enterprise Sponsorship&lt;/h2&gt;
+
+&lt;p&gt;A year into it’s life, micro attracted the attention of
+&lt;a href=&quot;https://www.sixt.com/&quot;&gt;Sixt&lt;/a&gt;, the German car rental enterprise. Sixt undergoing a technical transformation 
+understood how micro could be leveraged as a competitive advantage. This led to the first 
+&lt;a href=&quot;/blog/cn/2016/04/25/announcing-sixt-sponsorship.html&quot;&gt;Enterprise Sponsorship&lt;/a&gt; of micro 
+and a potentially better path to funding it’s long term open source development.&lt;/p&gt;
+
+&lt;p&gt;Since then micro has gone on to be used in production by dozens of companies all over the world. Most building very 
+different products yet despite this, they all have one thing in common.&lt;/p&gt;
+
+&lt;p&gt;Micro has become the core technology for building their platforms.&lt;/p&gt;
+
+&lt;p&gt;It’s been 2 years since micro was sponsored by Sixt. Our hope was that other enterprises using micro would 
+follow suit, enabling us to scale it’s development.&lt;/p&gt;
+
+&lt;p&gt;We believe there are a number of reasons this has been unsuccessful and came to the realisation that 
+the approach to sponsorship for micro needed to change.&lt;/p&gt;
+
+&lt;h2 id=&quot;joining-patreon&quot;&gt;Joining Patreon&lt;/h2&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://www.patreon.com&quot;&gt;Patreon&lt;/a&gt; is a platform for funding creators. There are a number of other similar platforms out there but 
+seeing the successful funding of projects like &lt;a href=&quot;https://www.patreon.com/evanyou&quot;&gt;Vue.js&lt;/a&gt; on Patreon leads me to believe 
+this is the best place for micro.&lt;/p&gt;
+
+&lt;p&gt;So with that, Micro can now officially be sponsored via &lt;a href=&quot;https://www.patreon.com/microhq&quot;&gt;Patreon&lt;/a&gt;.&lt;/p&gt;
+
+&lt;div style=&quot;margin: 25px; text-align: center;&quot;&gt;
+  &lt;a href=&quot;https://www.patreon.com/microhq&quot;&gt;
+    &lt;img src=&quot;/blog/cn/assets/images/patreon.png&quot; style=&quot;height: auto; width: 100%; margin: 0&quot; /&gt;
+  &lt;/a&gt;
+&lt;/div&gt;
+
+&lt;p&gt;Patreon provides a simple, easy to use and visible place for sponsorship. Micro’s users span from individuals 
+to multi-billion dollar enterprises. Patreon enables us to specify different levels of sponsorship so that anyone 
+can support micro, from as little as $10/month as a backer or $5000/month as an enterprise sponsor.&lt;/p&gt;
+
+&lt;p&gt;It’s early days but people have already started to show their support with over $500/month in commitment. I would like 
+to personally thank them for their support. Join Sixt and the many others by sponsoring Micro on &lt;a href=&quot;https://www.patreon.com/microhq&quot;&gt;Patreon&lt;/a&gt;.&lt;/p&gt;
+
+&lt;h2 id=&quot;the-future&quot;&gt;The Future&lt;/h2&gt;
+
+&lt;p&gt;I’m excited by all the possibilities enabled by opening up sponsorship to everyone via &lt;a href=&quot;https://www.patreon.com/microhq&quot;&gt;Patreon&lt;/a&gt; 
+but also thinking more and more about the long term future of micro.&lt;/p&gt;
+
+&lt;p&gt;Open source sustainability is a hot topic of discussion. It’s something I’m living and breathing on a daily basis. 
+I believe sponsorship is a strong route forward but projects must also look beyond it to be truly sustainable.&lt;/p&gt;
+
+&lt;p&gt;Micro today is an open source project funded by sponsorship. In the future we may look toward an open core model. 
+Providing a turn-key enterprise solution.&lt;/p&gt;
+
+&lt;p&gt;This would enable a self-sustaining future for micro while allowing it to fund it’s own open source development. 
+Reach out to discuss or learn more.&lt;/p&gt;
+
+&lt;center&gt;&lt;p&gt;...&lt;/p&gt;&lt;/center&gt;
+&lt;p&gt;If you want to learn more about micro, checkout the &lt;a href=&quot;https://micro.mu&quot;&gt;website&lt;/a&gt; or 
+visit &lt;a href=&quot;https://github.com/micro/micro&quot;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Follow us on &lt;a href=&quot;https://twitter.com/microhq&quot;&gt;Twitter&lt;/a&gt; or join the &lt;a href=&quot;http://slack.micro.mu&quot;&gt;Slack&lt;/a&gt; community.&lt;/p&gt;
+
+</description>
+        <pubDate>Mon, 16 Apr 2018 10:00:00 +0100</pubDate>
+        <link>https://micro.mu//blog/cn/2018/04/16/micro-on-patreon.html</link>
+        <guid isPermaLink="true">https://micro.mu//blog/cn/2018/04/16/micro-on-patreon.html</guid>
+        
+        
+      </item>
+    
+      <item>
+        <title>Functions with Micro</title>
+        <description>&lt;p&gt;&lt;br /&gt;
+As technology evolves so do our programming models. We’ve gone from monoliths to microservices 
+and more recently started to push this separation even further towards functions.&lt;/p&gt;
+
+&lt;p&gt;Micro looks to simplify distributed systems development, with &lt;a href=&quot;https://github.com/micro/go-micro&quot;&gt;go-micro&lt;/a&gt; 
+providing a pluggable framework for microservices. Go-micro has historically included a high level &lt;a href=&quot;https://godoc.org/github.com/micro/go-micro#Service&quot;&gt;Service&lt;/a&gt; 
+interface, encapsulating the lower level requirements for microservices.&lt;/p&gt;
+
+&lt;p&gt;Today we’re introducing the &lt;a href=&quot;https://godoc.org/github.com/micro/go-micro#Function&quot;&gt;Function&lt;/a&gt; 
+interface, a one time executing Service.&lt;/p&gt;
+
+&lt;script src=&quot;https://gist.github.com/asim/bfbaf036c90761879dbf6e939e5172e4.js&quot;&gt;&lt;/script&gt;
+
+&lt;h3 id=&quot;the-inspiration&quot;&gt;The Inspiration&lt;/h3&gt;
+
+&lt;p&gt;Ben Firshman open sourced a project last year called &lt;a href=&quot;https://github.com/bfirsh/funker&quot;&gt;Funker&lt;/a&gt;, functions as docker containers. The concept is very 
+simple but also extremely clever.&lt;/p&gt;
+
+&lt;p&gt;Functions could quite simply be programs with one method, listening on the network for a request and exiting after 
+executing once, leveraging docker swarm services for lifecycle management, discovery, etc.&lt;/p&gt;
+
+&lt;p&gt;This sparked the inspiration for including functions as part of go-micro.&lt;/p&gt;
+
+&lt;h3 id=&quot;why-functions&quot;&gt;Why Functions?&lt;/h3&gt;
+
+&lt;p&gt;The function programming model is the evolution of microservices. As our scale requirements increase both technically and organisationally 
+there’s a need to decouple systems and teams so they can operate independently.&lt;/p&gt;
+
+&lt;p&gt;In the past 5 years we’ve seen the emergence of microservices as a way of dealing with those scaling requirements. The microservices 
+architecture pattern is of course nothing new but we’ve now started to define best practices which help us build better software.&lt;/p&gt;
+
+&lt;p&gt;Functions push us into a new realm of possibility in terms of simplifying distributed systems development and solving software problems. 
+Going back to the unix philosophy, “do one thing and do it well”, functions truly embody that philosophy even more so than microservices.&lt;/p&gt;
+
+&lt;p&gt;While infrastructure helps us build scalable systems, remember that microservices and functions are software architecture patterns 
+and programming models, so with that we need tools which help us to write software using those patterns.&lt;/p&gt;
+
+&lt;h3 id=&quot;example-function&quot;&gt;Example Function&lt;/h3&gt;
+
+&lt;p&gt;Here’s a straight forward example of writing a function with go-micro.&lt;/p&gt;
+
+&lt;p&gt;As you can tell it looks almost identical to a service definition. That’s because underneath the covers they are exactly the 
+same except for one small detail, functions exit after one execution of a handler or subscriber.&lt;/p&gt;
+
+&lt;p&gt;Functions give you the same functionality as services, letting you leverage all the existing micro ecosystem tooling.&lt;/p&gt;
+
+&lt;script src=&quot;https://gist.github.com/asim/7d70cf1160ad1279597f12985fe3fbd5.js&quot;&gt;&lt;/script&gt;
+
+&lt;h3 id=&quot;running-functions&quot;&gt;Running Functions&lt;/h3&gt;
+
+&lt;p&gt;As previously stated, functions in micro are one time executing services, the function will exit after completing a request. This then 
+poses the question, how do we keep functions running?&lt;/p&gt;
+
+&lt;p&gt;There is an abundance of existing tooling out there for process lifecycle management, so feel free to use any of your favourite 
+process managers.&lt;/p&gt;
+
+&lt;p&gt;However the micro toolkit now includes a convenience tool called &lt;a href=&quot;https://micro.mu/docs/run.html&quot;&gt;&lt;strong&gt;micro run&lt;/strong&gt;&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Here’s how to run a function:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;micro run -r github.com/micro/examples/function
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;The &lt;strong&gt;micro run&lt;/strong&gt; command fetches, builds and executes from source. The &lt;code&gt;-r&lt;/code&gt; flag tells it restart the function on exit. 
+It’s currently a simple and experimental tool for running micro based microservices and functions. From source to running in one command.&lt;/p&gt;
+
+&lt;p&gt;There will be a separate post for the run command once it’s more stable.&lt;/p&gt;
+
+&lt;h3 id=&quot;summary&quot;&gt;Summary&lt;/h3&gt;
+
+&lt;p&gt;Functions are a natural extension of microservices as the next programming model to help simplify distributed systems development. 
+Micro treats functions as a first class citizen.&lt;/p&gt;
+
+&lt;p&gt;While functions have been added to go-micro, it does not mean 100% of your software needs to be written with them. It’s important 
+to understand when monoliths, microservices or functions are appropriate.&lt;/p&gt;
+
+&lt;p&gt;Look to see more on integrating micro functions with existing systems and serverless tooling in the near future.&lt;/p&gt;
+
+&lt;center&gt;&lt;p&gt;...&lt;/p&gt;&lt;/center&gt;
+&lt;p&gt;If you want to learn more about the services we offer or microservices, checkout the &lt;a href=&quot;https://micro.mu&quot;&gt;website&lt;/a&gt; or 
+visit &lt;a href=&quot;https://github.com/micro/micro&quot;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Follow us on &lt;a href=&quot;https://twitter.com/microhq&quot;&gt;Twitter&lt;/a&gt; or join the &lt;a href=&quot;http://slack.micro.mu&quot;&gt;Slack&lt;/a&gt; community.&lt;/p&gt;
+
+</description>
+        <pubDate>Tue, 06 Jun 2017 10:00:00 +0100</pubDate>
+        <link>https://micro.mu//blog/cn/2017/06/06/functions.html</link>
+        <guid isPermaLink="true">https://micro.mu//blog/cn/2017/06/06/functions.html</guid>
+        
+        
+      </item>
+    
+  </channel>
+</rss>

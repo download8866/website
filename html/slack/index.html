@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="description" content="Micro Slack">
+        <title>Micro - Slack</title>
+	<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+	<link rel="stylesheet" href="../css/m.css?v=4">
+        <style type="text/css">
+            .main {         
+            min-height: 100%;
+            min-height: 100vh;
+            padding-top: 5%;
+            } 
+            .blurb {
+            margin-top: 25px;
+            }
+        </style>
+	<script src='https://www.google.com/recaptcha/api.js'></script>
+    </head>
+    <body>
+        <div class="container-fluid">
+            <div class="row title">
+              <div class="col-md-10 offset-md-1">
+                <nav class="navbar navbar-expand-lg navbar-light">
+                <span class="text navbar-brand pull-left"><a href="/">Micro</a></span>
+                <span class="pull-right">
+                  <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#micro-nav" aria-controls="micro-nav" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                  </button>
+                </span>
+                <div class="collapse navbar-collapse" id="micro-nav" style="margin-top:10px;">
+                    <ul class="navbar-nav ml-auto">
+                    <li role="separator" class="divider"><hr /></li>
+                    <li class="nav-item"><a href="/about/" class="nav-link">About</a></li>
+                    <li class="nav-item"><a href="/blog/" class="nav-link">Blog</a></li>
+                    <li class="nav-item"><a href="/docs" class="nav-link">Docs</a></li>
+                    <li class="nav-item"><a href="/explore/" class="nav-link">Explore</a></li>
+                    <li class="nav-item"><a href="/slack" class="nav-link">Slack</a></li>
+                    <li class="nav-item"><a href="https://github.com/micro" class="nav-link">Tools</a></li>
+                   </ul>
+                </div>
+                </nav>
+              </div>
+            </div>
+        </div>
+        <div class="container-fluid"a>
+            <div class="row">
+                <div class="col-md-10 offset-md-1 main">
+                    <center>
+                        <h5><b>JOIN US</b></h5>
+                    </center>
+                    <div class="col-sm-8 offset-sm-2 blurb">
+			<center>
+			<img src="../slack.png" style="width: 150px; height: auto; margin-bottom: 20px;"/>
+			<p>We just need to verify you're human!</p>
+			<form action="/join" method="post" >
+			  <div style="width:305px">
+			  <div class="g-recaptcha" data-sitekey="6Lca0DAUAAAAAAe5fILUZgwBfhNf2JJr0C6kPPuG"></div>
+			  <p><br><button type="submit" class="btn btn-light btn-lg pull-left">Join us</button></p>
+			  </div>
+			</form>
+			</center>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="footer">
+            <center>
+                <ul class="list-inline">
+                    <li class="list-inline-item">&copy; 2019 Micro Services Inc.</li>
+                    <li class="list-inline-item"><a href="https://micro-services.slack.com"><i class="fa fa-slack"></i></a></li>
+                    <li class="list-inline-item"><a href="https://github.com/micro"><i class="fa fa-github"></i></a></li>
+                    <li class="list-inline-item"><a href="https://twitter.com/microhq"><i class="fa fa-twitter"></i></a></li>
+                    <li class="list-inline-item"><a href="mailto:hello@micro.mu"><i class="fa fa-envelope-o"></i></a></li>
+                </ul>
+            </center>
+        </div>
+    </body>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.3/umd/popper.min.js" integrity="sha384-ZMP7rVo3mIykV+2+9J3UJ46jBk0WLaUAdn689aCwoqbBJiSnjAK/l8WvCWPIPm49" crossorigin="anonymous"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/js/bootstrap.min.js" integrity="sha384-ChfqqxuZUCnJSK3+MXmPNIyE6ZbWh2IMqE241rYiqJxyMiZ6OW/JmZQ5stwEULTy" crossorigin="anonymous"></script>
+    <script>
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)})(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+        ga('create', 'UA-70478210-1', 'auto');ga('send', 'pageview');
+    </script><script>$(document).ready( function(){   $('.display').click(function() {     $('.login').show();  })});</script>
+</html>
+

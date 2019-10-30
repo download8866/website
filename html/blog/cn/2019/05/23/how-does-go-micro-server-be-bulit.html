@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/>
+
+    <title>Micro - 极简构建微服务</title>
+    <meta name="description" content="微服务与micro相关资讯"/>
+
+    <meta name="HandheldFriendly" content="True"/>
+    <meta name="MobileOptimized" content="320"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+    <link rel="stylesheet" type="text/css" href="/blog/cn/assets/css/screen.css"/>
+    <link rel="stylesheet" type="text/css"
+          href="//fonts.googleapis.com/css?family=Merriweather:300,700,700italic,300italic|Open+Sans:700,400"/>
+    <!-- Customisation  -->
+    <link rel="stylesheet" type="text/css" href="/blog/cn/assets/css/main.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.4.0/css/font-awesome.min.css">
+</head>
+<body class="home-template">
+
+<header class="main-header post-head no-cover">
+    <nav class="main-nav  clearfix">
+        <a class="back-button icon-arrow-left" href="/blog/cn/">Home</a>
+    </nav>
+</header>
+
+<main class="content" role="main">
+
+    <article class="post">
+
+        <header class="post-header">
+            <h1 class="post-title">Micro源码系列 - Go-Micro服务的构造过程</h1>
+            <section class="post-meta">
+                <time class="post-date"
+                      datetime="2019-05-23">23 May 2019</time>
+                
+            </section>
+        </header>
+
+        <!--         <header class="post-header">
+            <a id="blog-logo" href="/blog/cn">
+                
+                    <span class="blog-title">Micro</span>
+                
+            </a>
+        </header> -->
+
+        <!-- <span class="post-meta">
+            <time datetime="2019-05-23">23 May 2019</time>
+            
+        </span> -->
+
+        <!-- <h1 class="post-title">Micro源码系列 - Go-Micro服务的构造过程</h1> -->
+
+        <section class="post-content">
+            <p>在每一个技术领域，特别是微服务这一分支，<strong>Go-Micro</strong>尝试以最简单的方式帮助大家以最快的速度构建微服务。我们有比较详细但是仍需要大量持续更新、增进的文档，也有足够多的示例代码帮助大家验证每个功能点是否满足大家的业务需求。同时，我们在总结很多朋友的常询问的问题后，发现大家对<strong>Go-Micro</strong>的源码实现都很有兴趣。</p>
+
+<p>故而，在大家对了解如何使用<strong>Go-Micro</strong>来构建服务后，我们专门用这一系列来从设计到源码系统地讲解<strong>Go-Micro</strong>。</p>
+
+<h2 id="总架构">总架构</h2>
+
+<p>首先，我们从<strong>Go-Micro</strong>的架构图开始，回顾一下：</p>
+
+<p><a href="https://micro.mu/blog/cn/assets/images/go-micro.svg">
+  <img src="https://micro.mu/blog/cn/assets/images/go-micro.svg" style="width: 100%; height: auto; margin: 0;" />
+</a></p>
+
+<p>如上图所示，<strong>Go-Micro</strong>由三层设计共5大模块组成。</p>
+
+<p>最上层的<strong>service</strong>是基于<strong>Go-Micro</strong>所构建的服务，属于应用层，它属于<strong>Go-Micro</strong>末端。</p>
+
+<p>中层的<strong>Client</strong>与<strong>Server</strong>是第一层中<strong>service</strong>所包含的<strong>请求端</strong>与<strong>响应端</strong>，它们存在于<strong>service</strong>中，处于设计中的<strong>中游</strong>，是<strong>Go-Micro</strong>体系中一切请求与响应的出入口。</p>
+
+<p>最下层的便是<strong>Go-Micro</strong>核心5模块所在，broker负责消息，Codec负责编码，Registry负责注册发现，Selector负责负载均衡，Transport负责接收请求与响应。</p>
+
+<p><strong>Go-Micro</strong><u>本质是一个网络库（networking lib）</u>。</p>
+
+<h2 id="三段式">三段式</h2>
+
+<p><strong>Go-Micro</strong>中原生服务通常由三段组成：<em>NewService</em>，<em>Init</em>，<em>Run</em>。它们功能分别是创建服务，初始化服务，运行服务。</p>
+
+<pre><code class="language-go">func main() {
+    service := micro.NewService(
+        micro.Name("go.micro.srv.example"),
+    )
+
+    service.Init()
+
+    if err := service.Run(); err != nil {
+        log.Fatal(err)
+    }
+}
+</code></pre>
+
+<p>上面的代码便可以启动一个微服务。接下来，我们便从经典三段入手，先讲解这三段背后各自隐藏的逻辑。</p>
+
+<h3 id="newservice">NewService</h3>
+
+<p><strong>NewService</strong>负责创建新服务。它的参数是<a href="https://github.com/micro/go-micro/blob/master/micro.go#L42"><strong>micro.Option</strong></a>函数数组，此类函数专用来装配启动参数或配置选项。</p>
+
+<pre><code class="language-go">func NewService(opts ...Option) Service {
+    return newService(opts...)
+}
+</code></pre>
+
+<p>整个NewService有三个步骤：</p>
+
+<ul>
+  <li><a href="#1.初始化配置选项">初始化配置选项</a></li>
+  <li><a href="#2.包装客户端">包装客户端</a></li>
+  <li><a href="#3.组装服务">组装服务</a></li>
+</ul>
+
+<p><a href="https://micro.mu/blog/cn/assets/images/go-micro-service.png">
+  <img src="https://micro.mu/blog/cn/assets/images/go-micro-service.png" style="width: 100%; height: auto; margin: 0;" />
+</a></p>
+
+<p>参考上图，对2，3步骤可以有更好的理解。服务中有两个对象Client与Server，分别负责发送请求与接收请求。</p>
+
+<p>构建Service服务核心代码：</p>
+
+<p><a href="https://github.com/micro/go-micro/blob/master/service.go#L21-L34">service.go</a></p>
+
+<pre><code class="language-go">func newService(opts ...Option) Service {
+    
+    // 初始化配置选项
+    options := newOptions(opts...)
+
+    // 包装客户端
+    options.Client = &amp;clientWrapper{
+        options.Client,
+        metadata.Metadata{
+            HeaderPrefix + "From-Service": options.Server.Options().Name,
+        },
+    }
+
+    // 组装服务
+    return &amp;service{
+        opts: options,
+    }
+}
+</code></pre>
+
+<h4 id="1初始化配置选项">1.初始化配置选项</h4>
+
+<p>配置选项通过Option函数来传递</p>
+
+<p><a href="https://github.com/micro/go-micro/blob/master/micro.go#L42"><strong>Option</strong></a></p>
+
+<pre><code class="language-go">type Option func(*Options)
+</code></pre>
+
+<p>我们就用<strong>micro.Name(“go.micro.srv.example”)</strong>来说明</p>
+
+<p><a href="https://github.com/micro/go-micro/blob/master/options.go#L133-L137">options.go</a></p>
+
+<pre><code class="language-go">// Name of the service
+func Name(n string) Option {
+    return func(o *Options) {
+        o.Server.Init(server.Name(n))
+    }
+}
+</code></pre>
+
+<p>上述代码中接收服务名<em>n</em>后即返回一个回参为Option的匿名函数。函数中的<strong>o.Server.Init(server.Name(n))</strong>，我们这里不讲，大家只需要知道是服务的配置初始化逻辑，我们把它放到后面的专门讲解Server（包括：MockServer，RpcServer，HttpServer）的章节里讲解。</p>
+
+<p>更多选项配置函数参考：<a href="https://github.com/micro/go-micro/blob/master/options.go">options.go</a></p>
+
+<p>在上面的<strong>newService</strong>代码中，第一部分就是初始化传入的配置：</p>
+
+<pre><code class="language-go">func newService(opts ...Option) Service {
+    
+    // 初始化配置选项
+    options := newOptions(opts...)
+
+    // ...
+}
+</code></pre>
+
+<p>我们再来看看<a href="https://github.com/micro/go-micro/blob/master/options.go#L36-L52"><strong>newOptions</strong></a>方法</p>
+
+<pre><code class="language-go">func newOptions(opts ...Option) Options {
+    opt := Options{
+        Broker:    broker.DefaultBroker,
+        Cmd:       cmd.DefaultCmd,
+        Client:    client.DefaultClient,
+        Server:    server.DefaultServer,
+        Registry:  registry.DefaultRegistry,
+        Transport: transport.DefaultTransport,
+        Context:   context.Background(),
+    }
+
+    for _, o := range opts {
+        o(&amp;opt)
+    }
+
+    return opt
+}
+</code></pre>
+
+<p>可见，初始化配置中，预置有基础组件默认配置。再调用<strong>opts</strong>中传入的参数，逐个执行定制的配置函数。</p>
+
+<p>Option函数的参数是Options，里面维护服务配置信息，比如注册、命令行信息等。</p>
+
+<p>每个Option函数执行完后即返回配置对象Options。</p>
+
+<h4 id="2包装客户端">2.包装客户端</h4>
+
+<p>包装客户端在配置初始化之后，客户端由包装器<a href="https://github.com/micro/go-micro/blob/master/wrapper.go#L10-L13">clientWrapper</a>封装。</p>
+
+<pre><code class="language-go">func newService(opts ...Option) Service {
+    
+    options.Client = &amp;clientWrapper{
+        options.Client,
+        metadata.Metadata{
+            HeaderPrefix + "From-Service": options.Server.Options().Name,
+        },
+    }
+}
+</code></pre>
+
+<p>包装器继承了客户端，并自带由元数据组成的头：</p>
+
+<p><a href="https://github.com/micro/go-micro/blob/master/wrapper.go#L10-L13">wrapper.go</a></p>
+
+<pre><code class="language-go">type clientWrapper struct {
+    client.Client
+    headers metadata.Metadata
+}
+</code></pre>
+
+<p>go-micro中的Client都有三个能力：</p>
+
+<ul>
+  <li>调用RPC Call</li>
+  <li>流式请求 Stream</li>
+  <li>广播消息 Publish</li>
+</ul>
+
+<pre><code class="language-go">func (c *clientWrapper) Call(ctx context.Context, req client.Request, rsp interface{}, opts ...client.CallOption) error {
+    ctx = c.setHeaders(ctx)
+    return c.Client.Call(ctx, req, rsp, opts...)
+}
+
+func (c *clientWrapper) Stream(ctx context.Context, req client.Request, opts ...client.CallOption) (client.Stream, error) {
+    ctx = c.setHeaders(ctx)
+    return c.Client.Stream(ctx, req, opts...)
+}
+
+func (c *clientWrapper) Publish(ctx context.Context, p client.Message, opts ...client.PublishOption) error {
+    ctx = c.setHeaders(ctx)
+    return c.Client.Publish(ctx, p, opts...)
+}
+</code></pre>
+
+<p>其实Service中Client并没有过多改变原生Client行为，只是在其发送请求或广播前把元数据放到上下文中传向下游服务传递。见setHeaders：</p>
+
+<p><a href="https://github.com/micro/go-micro/blob/master/wrapper.go#L15-L28"><strong>setHeaders</strong></a></p>
+
+<pre><code class="language-go">func (c *clientWrapper) setHeaders(ctx context.Context) context.Context {
+   
+    // 复制元数据信息
+    mda, _ := metadata.FromContext(ctx)
+    md := metadata.Copy(mda)
+
+    // 预置头信息塞到元数据
+    for k, v := range c.headers {
+        if _, ok := md[k]; !ok {
+            md[k] = v
+        }
+    }
+
+    // 元数据塞到上下文中
+    return metadata.NewContext(ctx, md)
+}
+</code></pre>
+
+<h4 id="3组装服务">3.组装服务</h4>
+
+<p><strong>Go-Micro</strong>中的server非常简单</p>
+
+<pre><code class="language-go">type service struct {
+    opts Options
+    once sync.Once
+}
+</code></pre>
+
+<p>服务结构中只有配置项与单次锁。</p>
+
+<p>以上就是service的构造过程。其最核心的地方便是<a href="#1.初始化配置选项">初始化配置选项</a>、<a href="#2.包装客户端">包装客户端</a>。本章的主要内容是介绍服务构建流程，所以不会深入讲解配置项，后面的章节会讲。</p>
+
+<h3 id="init">Init</h3>
+
+<p>初始化函数在构造服务之后，由服务调用，它的工作主要是再次渲染传入Init的Option配置项，然后再初始化命令行参数。</p>
+
+<pre><code class="language-go">func (s *service) Init(opts ...Option) {
+    // process options
+    for _, o := range opts {
+        o(&amp;s.opts)
+    }
+
+    s.once.Do(func() {
+        // 初始化命令行参数，会覆盖的参数
+        _ = s.opts.Cmd.Init(
+            cmd.Broker(&amp;s.opts.Broker),
+            cmd.Registry(&amp;s.opts.Registry),
+            cmd.Transport(&amp;s.opts.Transport),
+            cmd.Client(&amp;s.opts.Client),
+            cmd.Server(&amp;s.opts.Server),
+        )
+    })
+}
+</code></pre>
+
+<p>由于在<strong>NewService</strong>中加载过一次传入的配置项，而Init中如果有配置项传入，会改变之此前的值，故而，在<strong>Go-Micro</strong>体系中，配置项的生效顺序由小到大依次是：<strong>默认值 &lt; 硬编码值（随构造函数传入）&lt; 命令行参数</strong>。</p>
+
+<p>我们再用<strong>micro.Name(“go.micro.srv.example”)</strong>来说明，假设我们通过下列4种方式指定服务名：</p>
+
+<ul>
+  <li>默认值</li>
+</ul>
+
+<pre><code class="language-go">service := micro.NewService()
+</code></pre>
+
+<ul>
+  <li>随参传入</li>
+</ul>
+
+<pre><code class="language-go">service := micro.NewService(
+        micro.Name("go.micro.api.new"), 
+        )
+</code></pre>
+
+<ul>
+  <li>随参传入 Init</li>
+</ul>
+
+<pre><code class="language-go">service.Init(micro.Name("go.micro.api.init"),)
+</code></pre>
+
+<ul>
+  <li>命令行参数</li>
+</ul>
+
+<pre><code class="language-bash">go run main.go --server_name=go.micro.api.cmd
+</code></pre>
+
+<p>它们各自打印的服务名分别是：</p>
+
+<ul>
+  <li>server</li>
+  <li>go.micro.api.new</li>
+  <li>go.micro.api.init</li>
+  <li>go.micro.api.cmd</li>
+</ul>
+
+<p><strong>Init</strong>函数的本质是<u>再次加载配置，并确保权重最高的命令行参数生效</u>。</p>
+
+<h3 id="run">Run</h3>
+
+<p>在服务构造与初始化完成后，便可以执行<strong>Run</strong>函数，它负责新增协程把服务启动（Start），然后通过select指令阻塞并侦听相关的关闭信号，随后执行关闭程序。</p>
+
+<p><a href="https://github.com/micro/go-micro/blob/master/service.go#L115-L131"><strong>Run</strong></a></p>
+
+<pre><code class="language-go">func (s *service) Run() error {
+    
+    // 启动服务
+    if err := s.Start(); err != nil {
+        return err
+    }
+
+    ch := make(chan os.Signal, 1)
+    signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+
+    select {
+    // 侦听kill信号
+    case &lt;-ch:
+    // 侦听上下文关闭信号
+    case &lt;-s.opts.Context.Done():
+    }
+
+    return s.Stop()
+}
+</code></pre>
+
+<p>在上述代码中我们看到，服务启动后由<strong>signal.Notify</strong>方法将三个信号量绑定到信道上：</p>
+
+<ul>
+  <li>syscall.SIGTERM 结束进程</li>
+  <li>syscall.SIGINT  ctrl + c</li>
+  <li>syscall.SIGQUIT ctrl + \</li>
+</ul>
+
+<p>题外，类Unix标准系统中，只有如下几个信号绑定了键盘</p>
+
+<blockquote>
+  <p>SIGHUP、SIGINT、SIGTTOU、SIGTTIN、SIGQUIT、SIGTSTP</p>
+</blockquote>
+
+<h4 id="服务启动">服务启动</h4>
+
+<p>服务的启动由<strong>Run</strong>函数中的启动方法<strong>Start</strong>完成</p>
+
+<pre><code class="language-go">func (s *service) Run() error {
+    
+    // 启动服务
+    if err := s.Start(); err != nil {
+        return err
+    }
+
+    // ...
+}
+</code></pre>
+
+<p><a href="https://github.com/micro/go-micro/blob/master/service.go#L73-L91"><strong>Start</strong></a></p>
+
+<pre><code class="language-go">func (s *service) Start() error {
+    
+    // 启动勾子
+    for _, fn := range s.opts.BeforeStart {
+        if err := fn(); err != nil {
+            return err
+        }
+    }
+
+    if err := s.opts.Server.Start(); err != nil {
+        return err
+    }
+
+    // 启动完成勾子
+    for _, fn := range s.opts.AfterStart {
+        if err := fn(); err != nil {
+            return err
+        }
+    }
+
+    return nil
+}
+</code></pre>
+
+<h4 id="启动勾子">启动勾子</h4>
+
+<p>启动函数Start中前后各有启动开始和结束两个勾子选项，可以在NewService或Init中将其传入：</p>
+
+<pre><code class="language-go">    service.Init(
+        micro.BeforeStart(func() error {
+            log.Log(1)
+            return nil
+        }),
+        micro.BeforeStart(func() error {
+            log.Log(2)
+            return nil
+        }),
+        micro.BeforeStop(func() error {
+            return nil
+        }),
+    )
+</code></pre>
+
+<p>需要多个就传入多个，在渲染配置时会将它们附加到指定启动函数数组中：</p>
+
+<pre><code class="language-go">func BeforeStart(fn func() error) Option {
+    return func(o *Options) {
+        // 有多个则会附加进去
+        o.BeforeStart = append(o.BeforeStart, fn)
+    }
+}
+</code></pre>
+
+<h4 id="服务启动-1">服务启动</h4>
+
+<pre><code class="language-go">func (s *service) Start() error {
+    
+    // ...
+
+    if err := s.opts.Server.Start(); err != nil {
+        return err
+    }
+
+
+    // ...
+}
+</code></pre>
+
+<p>服务启动是通过在配置项的中的Server对象的<strong>Start</strong>方法触发。</p>
+
+<p>整个<strong>Start</strong>分为以下几个步骤</p>
+
+<ol>
+  <li>注册调试接口endpoint，Debug.{Method}</li>
+  <li>transport 分配地址</li>
+  <li>broker 分配地址并连接</li>
+  <li>register 注册</li>
+  <li>侦听连接请求与关闭信号</li>
+  <li>循环保活</li>
+</ol>
+
+<p>我们来看关键代码（删除了部分逻辑，增加注释）</p>
+
+<pre><code class="language-go">func (s *rpcServer) Start() error {
+    
+    // 1. 注册调试接口endpoint，Debug.{Method}
+    registerDebugHandler(s)
+    config := s.Options()
+
+    // 2. transport 分配地址
+    ts, err := config.Transport.Listen(config.Address)
+    if err != nil {
+        return err
+    }
+
+    // 默认端口是0，意味着会随机分配，但是我们需要反填随机端口，以让请求能够到达
+    s.Lock()
+    addr := s.opts.Address
+    s.opts.Address = ts.Addr()
+    s.Unlock()
+
+    // 3. broker 分配地址并连接
+    if err := config.Broker.Connect(); err != nil {
+        return err
+    }
+
+  
+    // 4. register 注册
+    if err := s.Register(); err != nil {
+        log.Log("Server register error: ", err)
+    }
+
+    exit := make(chan bool)
+
+    // 新协程侦听请求与关闭信号
+    go func() {
+        for {
+            // listen for connections
+            err := ts.Accept(s.ServeConn)
+
+            select {
+            // check if we're supposed to exit
+            case &lt;-exit:
+                return
+            // check the error and backoff
+            default:
+                if err != nil {
+                    log.Logf("Accept error: %v", err)
+                    time.Sleep(time.Second)
+                    continue
+                }
+            }
+
+            // no error just exit
+            return
+        }
+    }()
+
+    // 6. 循环保活
+    go func() {
+        t := new(time.Ticker)
+
+        // only process if it exists
+        if s.opts.RegisterInterval &gt; time.Duration(0) {
+            // new ticker
+            t = time.NewTicker(s.opts.RegisterInterval)
+        }
+
+        // return error chan
+        var ch chan error
+
+    Loop:
+        for {
+            select {
+            // 重新注册，保持节点在线
+            case &lt;-t.C:
+                if err := s.Register(); err != nil {
+                    log.Log("Server register error: ", err)
+                }
+            // 侦听退出信号
+            case ch = &lt;-s.exit:
+                t.Stop()
+                close(exit)
+                break Loop
+            }
+        }
+
+        // 退出后往注册中心卸载节点
+        if err := s.Deregister(); err != nil {
+            log.Log("Server deregister error: ", err)
+        }
+
+        // 等待所有请求都返回
+        if wait(s.opts.Context) {
+            s.wg.Wait()
+        }
+
+        // 关闭侦听
+        ch &lt;- ts.Close()
+
+        // 关闭broker
+        config.Broker.Disconnect()
+
+        // 归还原始值，不重要，只是为了回归原始
+        s.Lock()
+        s.opts.Address = addr
+        s.Unlock()
+    }()
+
+    return nil
+}
+</code></pre>
+
+<p>我们在代码中注释了具体过程。但是其中非常重要的环节，比如register注册、broker连接等我们不深入讲解，会放到其实章节中演示，这也是为了让本章主题更向服务构建与启动靠拢。</p>
+
+<h2 id="总结">总结</h2>
+
+<p>我们在这一章节中讲了<strong>Go-Micro</strong>服务是如何构造与启动的，下一章我们会讲解micro服务的注册是如何实现的。</p>
+
+<h2 id="micro源码系列">Micro源码系列</h2>
+
+<ol>
+  <li><a href="https://micro.mu/blog/cn/2019/05/23/how-does-go-micro-server-be-bulit.html">Go-Micro服务的构造过程</a></li>
+  <li><a href="https://micro.mu/blog/cn/2019/06/01/how-does-go-micro-register-services.html">Go-Micro注册解读</a></li>
+  <li>[Go-Micro客户端解读（in progress）]</li>
+</ol>
+
+<h2 id="micro-中文资源">Micro 中文资源</h2>
+
+<ol>
+  <li><a href="https://github.com/micro-in-cn/all-in-one">中文示例集</a></li>
+  <li><a href="https://github.com/micro-in-cn/tutorials">中文教程</a></li>
+  <li><a href="https://micro.mu/blog/cn">中文博客</a></li>
+  <li><a href="https://github.com/micro-in-cn/platform-web">Micro服务治理控制台</a></li>
+</ol>
+
+        </section>
+
+        
+
+        <footer class="post-footer">
+
+            
+
+            <figure class="author-image">
+                <a class="img" href="https://twitter.com/chuhnk"
+                   style="background-image: url(/blog/cn/assets/images/profile_sx.jpg)">
+                    <span class="hidden">Asim Aslam's Picture</span></a>
+            </figure>
+            <section class="author">
+                <!-- Author Name -->
+                <h4><a href="https://github.com/printfcoder">舒先</a></h4>
+                <!-- Author Bio -->
+                <p>
+                    maintainer of micro & overseeing micro China, senior engineer@huize
+                </p>
+            </section>
+
+
+            <!-- If we want to display author's name and bio -->
+            
+
+            <!-- Share links section -->
+            <section class="share">
+    <h4>Share this post</h4>
+    <a class="icon-twitter" href="http://twitter.com/share?text=Micro源码系列 - Go-Micro服务的构造过程&amp;url=https://micro.mu//blog/cn/2019/05/23/how-does-go-micro-server-be-bulit.html"
+        onclick="window.open(this.href, 'twitter-share', 'width=550,height=235');return false;">
+        <span class="hidden">Twitter</span>
+    </a>
+    <a class="icon-facebook" href="https://www.facebook.com/sharer/sharer.php?u=https://micro.mu//blog/cn/2019/05/23/how-does-go-micro-server-be-bulit.html"
+        onclick="window.open(this.href, 'facebook-share','width=580,height=296');return false;">
+        <span class="hidden">Facebook</span>
+    </a>
+    <a class="icon-google-plus" href="https://plus.google.com/share?url=https://micro.mu//blog/cn/2019/05/23/how-does-go-micro-server-be-bulit.html"
+       onclick="window.open(this.href, 'google-plus-share', 'width=490,height=530');return false;">
+        <span class="hidden">Google+</span>
+    </a>
+</section>
+
+
+            <!-- Disqus comments -->
+            
+
+        </footer>
+
+    </article>
+
+</main>
+
+<footer class="site-footer clearfix">
+    <center>
+        <div class="footer">
+            <center>
+                <ul class="list-inline">
+                    <li class="list-inline-item">&copy; 2019 Micro Services Inc.</li>
+                    <li class="list-inline-item"><a href="https://micro-services.slack.com"><i class="fa fa-slack"></i></a></li>
+                    <li class="list-inline-item"><a href="https://github.com/micro"><i class="fa fa-github"></i></a></li>
+                    <li class="list-inline-item"><a href="https://twitter.com/microhq"><i class="fa fa-twitter"></i></a></li>
+                    <li class="list-inline-item"><a href="mailto:contact@micro.mu"><i class="fa fa-envelope-o"></i></a></li>
+                </ul>
+            </center>
+        </div>
+    </center>
+</footer>
+
+<script type="text/javascript" src="/blog/cn/assets/js/jquery-1.11.1.min.js"></script>
+<script type="text/javascript" src="/blog/cn/assets/js/jquery.fitvids.js"></script>
+<script type="text/javascript" src="/blog/cn/assets/js/index.js"></script>
+
+<!-- Google Analytics Tracking code -->
+<script>
+    (function (i, s, o, g, r, a, m) {
+        i['GoogleAnalyticsObject'] = r;
+        i[r] = i[r] || function () {
+            (i[r].q = i[r].q || []).push(arguments)
+        }, i[r].l = 1 * new Date();
+        a = s.createElement(o),
+            m = s.getElementsByTagName(o)[0];
+        a.async = 1;
+        a.src = g;
+        m.parentNode.insertBefore(a, m)
+    })(window, document, 'script', '//www.google-analytics.com/analytics.js', 'ga');
+
+    ga('create', 'UA-70478210-1', 'auto');
+    ga('send', 'pageview');
+
+</script>
+</body>
+</html>
