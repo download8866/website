@@ -56,6 +56,12 @@
   
   
   <url>
+    <loc>https://micro.mu/docs/debugging.html</loc>
+  </url>
+  
+  
+  
+  <url>
     <loc>https://micro.mu/docs/cn/deploy-docker.html</loc>
   </url>
   
@@ -126,6 +132,12 @@
   </url>
   
   
+  
+  
+  
+  <url>
+    <loc>https://micro.mu/docs/framework.html</loc>
+  </url>
   
   
   
@@ -238,7 +250,13 @@
   
   
   <url>
-    <loc>https://micro.mu/docs/install-guide.html</loc>
+    <loc>https://micro.mu/docs/installation.html</loc>
+  </url>
+  
+  
+  
+  <url>
+    <loc>https://micro.mu/docs/micro-service.html</loc>
   </url>
   
   

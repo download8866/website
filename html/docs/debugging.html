@@ -6,10 +6,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description"
     content="">
-<meta name="keywords" content="kubernetes,  kubernetes">
+<meta name="keywords" content="debug,  debug">
 
 
-<title>Kubernetes Deployment | Micro</title>
+<title>Debugging | Micro</title>
 
 
 <link rel="stylesheet" href="/docs/css/syntax.css">
@@ -363,7 +363,7 @@
             
             
             
-            <li class="active highlight"><a href="/docs/deploy-kubernetes.html">Kubernetes</a></li>
+            <li><a href="/docs/deploy-kubernetes.html">Kubernetes</a></li>
             
             
             
@@ -378,7 +378,7 @@
             
             
             
-            <li><a href="/docs/debugging.html">Debugging</a></li>
+            <li class="active highlight"><a href="/docs/debugging.html">Debugging</a></li>
             
             
             
@@ -459,7 +459,7 @@
                 <!-- Content Column -->
                 <div class="col-md-9">
                     <div class="post-header">
-   <h1 class="post-title-main">Kubernetes Deployment</h1>
+   <h1 class="post-title-main">Debugging</h1>
 </div>
 
 
@@ -470,247 +470,31 @@
 
     
 
-  <p>This doc provides a guide to running micro on kubernetes.</p>
+  <p>Enable debugging of micro or go-micro very simply via the following environment variables.</p>
 
-<h2 id="getting-started">Getting Started</h2>
+<h2 id="logging">Logging</h2>
 
-<ul>
-  <li><a href="#install-micro">Install Micro</a></li>
-  <li><a href="#writing-a-service">Writing a Service</a></li>
-  <li><a href="#deploying-a-service">Deploying a Service</a></li>
-  <li><a href="#healthchecking-sidecar">Healthchecking Sidecar</a>
-    <ul>
-      <li><a href="#install-healthchecker">Install healthchecker</a></li>
-      <li><a href="#run-healtchecker">Run healtchecker</a></li>
-      <li><a href="#k8s-deployment">K8s Deployment</a></li>
-    </ul>
-  </li>
-  <li><a href="#k8s-load-balancing">K8s Load Balancing</a>
-    <ul>
-      <li><a href="#usage">Usage</a></li>
-      <li><a href="#k8s-deployment-1">K8s Deployment</a></li>
-      <li><a href="#k8s-service">K8s Service</a></li>
-    </ul>
-  </li>
-</ul>
+<p>To enable debug logging</p>
 
-<h2 id="install-micro">Install Micro</h2>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go get github.com/micro/kubernetes/cmd/micro
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MICRO_LOG_LEVEL=debug
 </code></pre></div></div>
 
-<p>or</p>
+<p>The log levels supported are</p>
 
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker pull micro/micro:kubernetes
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>trace
+debug
+error
+info
 </code></pre></div></div>
 
-<p>For go-micro</p>
+<h2 id="profiling">Profiling</h2>
 
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>import "github.com/micro/kubernetes/go/micro"
+<p>To enable profiling via pprof</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MICRO_DEBUG_PROFILE=true
 </code></pre></div></div>
 
-<h2 id="writing-a-service">Writing a Service</h2>
-
-<p>Write a service as you would any other <a href="https://github.com/micro/go-micro">go-micro</a> service.</p>
-
-<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">import</span><span class="x"> </span><span class="p">(</span><span class="x">
-	</span><span class="s">"github.com/micro/go-micro"</span><span class="x">
-	</span><span class="n">k8s</span><span class="x"> </span><span class="s">"github.com/micro/kubernetes/go/micro"</span><span class="x">
-</span><span class="p">)</span><span class="x">
-
-</span><span class="k">func</span><span class="x"> </span><span class="n">main</span><span class="p">()</span><span class="x"> </span><span class="p">{</span><span class="x">
-	</span><span class="n">service</span><span class="x"> </span><span class="o">:=</span><span class="x"> </span><span class="n">k8s</span><span class="o">.</span><span class="n">NewService</span><span class="p">(</span><span class="x">
-		</span><span class="n">micro</span><span class="o">.</span><span class="n">Name</span><span class="p">(</span><span class="s">"greeter"</span><span class="p">)</span><span class="x">
-	</span><span class="p">)</span><span class="x">
-	</span><span class="n">service</span><span class="o">.</span><span class="n">Init</span><span class="p">()</span><span class="x">
-	</span><span class="n">service</span><span class="o">.</span><span class="n">Run</span><span class="p">()</span><span class="x">
-</span><span class="p">}</span><span class="x">
-</span></code></pre></div></div>
-
-<h2 id="deploying-a-service">Deploying a Service</h2>
-
-<p>Here’s an example k8s deployment for a micro service</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>apiVersion: extensions/v1beta1
-kind: Deployment
-metadata:
-  namespace: default
-  name: greeter
-spec:
-  replicas: 1
-  template:
-    metadata:
-      labels:
-        app: greeter-srv
-    spec:
-      containers:
-        - name: greeter
-          command: [
-		"/greeter-srv",
-		"--server_address=0.0.0.0:8080",
-		"--broker_address=0.0.0.0:10001"
-	  ]
-          image: microhq/greeter-srv:kubernetes
-          imagePullPolicy: Always
-          ports:
-          - containerPort: 8080
-            name: greeter-port
-</code></pre></div></div>
-
-<p>Deploy with kubectl</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>kubectl create -f greeter.yaml
-</code></pre></div></div>
-
-<h2 id="healthchecking-sidecar">Healthchecking Sidecar</h2>
-
-<p>The healthchecking sidecar exposes <code class="highlighter-rouge">/health</code> as a http endpoint and calls the rpc endpoint <code class="highlighter-rouge">Debug.Health</code> on a service. 
-Every go-micro service has a built in Debug.Health endpoint.</p>
-
-<h3 id="install-healthchecker">Install healthchecker</h3>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go get github.com/micro/kubernetes/cmd/health
-</code></pre></div></div>
-
-<p>or</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker pull microhq/health:kubernetes
-</code></pre></div></div>
-
-<h3 id="run-healtchecker">Run healtchecker</h3>
-
-<p>Run e.g healthcheck greeter service with address localhost:9091</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>health --server_name=greeter --server_address=localhost:9091
-</code></pre></div></div>
-
-<p>Call the healthchecker on localhost:8080</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>curl http://localhost:8080/health
-</code></pre></div></div>
-
-<h3 id="k8s-deployment">K8s Deployment</h3>
-
-<p>Add to a kubernetes deployment</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>apiVersion: extensions/v1beta1
-kind: Deployment
-metadata:
-  namespace: default
-  name: greeter
-spec:
-  replicas: 1
-  template:
-    metadata:
-      labels:
-        app: greeter-srv
-    spec:
-      containers:
-        - name: greeter
-          command: [
-		"/greeter-srv",
-		"--server_address=0.0.0.0:8080",
-		"--broker_address=0.0.0.0:10001"
-	  ]
-          image: microhq/greeter-srv:kubernetes
-          imagePullPolicy: Always
-          ports:
-          - containerPort: 8080
-            name: greeter-port
-        - name: health
-          command: [
-		"/health",
-                "--health_address=0.0.0.0:8081",
-		"--server_name=greeter",
-		"--server_address=0.0.0.0:8080"
-	  ]
-          image: microhq/health:kubernetes
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8081
-            initialDelaySeconds: 3
-            periodSeconds: 3
-</code></pre></div></div>
-
-<h2 id="k8s-load-balancing">K8s Load Balancing</h2>
-
-<p>Micro includes client side load balancing by default but kubernetes also provides Service load balancing strategies. 
-We can offload load balancing to k8s by using the <a href="https://github.com/micro/go-plugins/tree/master/selector/static">static selector</a> 
-and k8s services.</p>
-
-<p>Rather than doing address resolution, the static selector returns the service name plus a fixed port e.g greeter returns greeter:8080. 
-Read about the <a href="https://github.com/micro/go-plugins/tree/master/selector/static">static selector</a>.</p>
-
-<h3 id="usage">Usage</h3>
-
-<p>To use the static selector when running your service specify the flag or env var</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MICRO_SELECTOR=static ./service
-</code></pre></div></div>
-
-<p>or</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./service --selector=static
-</code></pre></div></div>
-
-<h3 id="k8s-deployment-1">K8s Deployment</h3>
-
-<p>An example deployment</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>apiVersion: extensions/v1beta1
-kind: Deployment
-metadata:
-  namespace: default
-  name: greeter
-spec:
-  replicas: 1
-  template:
-    metadata:
-      labels:
-        app: greeter-srv
-    spec:
-      containers:
-        - name: greeter
-          command: [
-		"/greeter-srv",
-		"--selector=static",
-		"--server_address=0.0.0.0:8080",
-		"--broker_address=0.0.0.0:10001"
-	  ]
-          image: microhq/greeter-srv:kubernetes
-          imagePullPolicy: Always
-          ports:
-          - containerPort: 8080
-            name: greeter-port
-</code></pre></div></div>
-
-<h3 id="k8s-service">K8s Service</h3>
-
-<p>The static selector offloads load balancing to k8s services. So ensure you create a k8s Service for each micro service.</p>
-
-<p>Here’s a sample service</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>apiVersion: v1
-kind: Service
-metadata:
-  name: greeter
-  labels:
-    app: greeter
-spec:
-  ports:
-  - port: 8080
-    protocol: TCP
-  selector:
-    app: greeter
-</code></pre></div></div>
-
-<p>Deploy with kubectl</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>kubectl create -f service.yaml
-</code></pre></div></div>
-
-<p>Calling micro service “greeter” from your service will route to the k8s service greeter:8080.</p>
+<p>This will write a cpu and heap profile to /tmp/[service name].[service version].{cpu, mem}.pprof</p>
 
 
 

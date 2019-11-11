@@ -92,6 +92,17 @@
 
 
 {
+"title": "Debugging",
+"tags": "debug",
+"keywords": "debug",
+"url": "debugging.html",
+"summary": ""
+}
+,
+
+
+
+{
 "title": "使用Docker发布",
 "tags": "docker",
 "keywords": "docker",
@@ -222,6 +233,17 @@
 ,
 
 
+
+
+
+{
+"title": "Framework",
+"tags": "go-microframework",
+"keywords": "go-micro, framework",
+"url": "framework.html",
+"summary": "Go Micro is a framework for microservices development"
+}
+,
 
 
 
@@ -427,8 +449,19 @@
 "title": "Install Guide",
 "tags": "install",
 "keywords": "install",
-"url": "install-guide.html",
+"url": "installation.html",
 "summary": ""
+}
+,
+
+
+
+{
+"title": "Micro Service",
+"tags": "microservice",
+"keywords": "micro, service",
+"url": "micro-service.html",
+"summary": "Turn anything into a micro service"
 }
 ,
 

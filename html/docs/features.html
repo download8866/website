@@ -18,7 +18,7 @@
 <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
 
 
-<link rel="stylesheet" href="/docs/css/customstyles.css">
+<link rel="stylesheet" href="/docs/css/customstyles.css?v=0">
 
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
@@ -151,7 +151,7 @@
         
     
     <li class="list-group-item">
-        <a href="#">Overview</a>
+        <a href="#" class="title">Overview</a>
         <ul>
             
             
@@ -170,7 +170,7 @@
             
             
             
-            <li class="active dark"><a href="/docs/features.html">Features</a></li>
+            <li class="active highlight"><a href="/docs/features.html">Features</a></li>
             
             
             
@@ -194,27 +194,12 @@
         
     
     <li class="list-group-item">
-        <a href="#">Network</a>
+        <a href="#" class="title">Framework</a>
         <ul>
             
             
             
-            <li><a href="/docs/network.html">Overview</a></li>
-            
-            
-            
-            
-        </ul>
-        
-        
-    
-    <li class="list-group-item">
-        <a href="#">Framework</a>
-        <ul>
-            
-            
-            
-            <li><a href="/docs/go-micro.html">Overview</a></li>
+            <li><a href="/docs/framework.html">Overview</a></li>
             
             
             
@@ -259,7 +244,7 @@
         
     
     <li class="list-group-item">
-        <a href="#">Runtime</a>
+        <a href="#" class="title">Runtime</a>
         <ul>
             
             
@@ -344,7 +329,22 @@
         
     
     <li class="list-group-item">
-        <a href="#">Deployment</a>
+        <a href="#" class="title">Network</a>
+        <ul>
+            
+            
+            
+            <li><a href="/docs/network.html">Overview</a></li>
+            
+            
+            
+            
+        </ul>
+        
+        
+    
+    <li class="list-group-item">
+        <a href="#" class="title">Deployment</a>
         <ul>
             
             
@@ -373,19 +373,19 @@
         
     
     <li class="list-group-item">
-        <a href="#">Guides</a>
+        <a href="#" class="title">Guides</a>
         <ul>
             
             
             
-            <li><a href="/docs/install-guide.html">Install Guide</a></li>
+            <li><a href="/docs/debugging.html">Debugging</a></li>
             
             
             
             
             
             
-            <li><a href="/docs/grpc-gateway.html">GRPC Gateway</a></li>
+            <li><a href="/docs/installation.html">Installation</a></li>
             
             
             
@@ -393,6 +393,13 @@
             
             
             <li><a href="/docs/writing-a-go-service.html">Writing a Go Service</a></li>
+            
+            
+            
+            
+            
+            
+            <li><a href="/docs/micro-service.html">Anything as a Service</a></li>
             
             
             
@@ -409,7 +416,7 @@
         
     
     <li class="list-group-item">
-        <a href="#">Plugins</a>
+        <a href="#" class="title">Plugins</a>
         <ul>
             
             
@@ -469,26 +476,15 @@
 
 <ul>
   <li><a href="https://github.com/micro/go-micro">Framework</a> for writing services</li>
-  <li><a href="https://github.com/micro/micro">Toolkit</a> to access services</li>
-  <li><a href="https://github.com/micro/examples">Examples</a> demonstrating usage</li>
-  <li><a href="https://micro.mu/explore/">Explorer</a> to search OSS contributions</li>
+  <li><a href="https://github.com/micro/micro">Runtime</a> to manage services</li>
+  <li><a href="https://micro.mu/docs/network.html">Network</a> to share services</li>
+  <li><a href="https://github.com/micro/examples">Examples</a> to learn by example</li>
+  <li><a href="https://github.com/micro/go-plugins">Plugins</a> to extend the tools</li>
 </ul>
 
-<h2 id="micro"><a href="https://github.com/micro/micro">Micro</a></h2>
+<h2 id="framework">Framework</h2>
 
-<p>Micro is a toolkit to query and access microservices</p>
-
-<ul>
-  <li>API Gateway as a single http entry point</li>
-  <li>Web Dashboard to visualise services</li>
-  <li>CLI for command line access</li>
-  <li>Bot to query via Slack or HipChat</li>
-  <li>New template generation to get started quickly</li>
-</ul>
-
-<h2 id="go-micro"><a href="https://github.com/micro/go-micro">Go Micro</a></h2>
-
-<p>Go Micro helps you write microservices</p>
+<p><a href="https://github.com/micro/go-micro">Go Micro</a> is a framework for microservice development</p>
 
 <ul>
   <li>Abstracts away distributed systems</li>
@@ -498,19 +494,31 @@
   <li>Pluggable interfaces to swap out backend technologies</li>
 </ul>
 
-<h2 id="go-config"><a href="https://github.com/micro/go-micro/tree/master/config">Go Config</a></h2>
+<h2 id="runtime">Runtime</h2>
 
-<p>Go Config manages the complexity of config</p>
+<p><a href="https://github.com/micro/micro">Micro</a> is a runtime environment for managing services</p>
 
 <ul>
-  <li>Dynamic - load config on the fly as you need it</li>
-  <li>Pluggable - choose which source to load from; file, envvar, consul</li>
-  <li>Mergeable - merge and override multiple config sources</li>
-  <li>Fallback - specify fallback values where keys don’t exist</li>
-  <li>Observable - Watch the config for changes</li>
+  <li>API Gateway as a single http entry point</li>
+  <li>Web Dashboard to visualise services</li>
+  <li>CLI for command line access</li>
+  <li>Bot to query via Slack or HipChat</li>
+  <li>New template generation to get started quickly</li>
 </ul>
 
-<h2 id="go-plugins"><a href="https://github.com/micro/go-plugins">Go Plugins</a></h2>
+<h2 id="network">Network</h2>
+
+<p>The <a href="https://micro.mu/docs/network.html">network</a> is a place to share and collaborate on services</p>
+
+<ul>
+  <li>Open global services network</li>
+  <li>Multi-cloud and multi-region</li>
+  <li>No hassle, no infrastructure management</li>
+</ul>
+
+<h2 id="plugins">Plugins</h2>
+
+<p><a href="https://github.com/micro/go-plugins">Go Plugins</a> is a place for community driven plugins</p>
 
 <ul>
   <li>Plugins for go-micro/micro</li>
@@ -521,9 +529,12 @@
 
 <h2 id="deployment">Deployment</h2>
 
+<p>Run services anywhere and everywhere</p>
+
 <ul>
-  <li><a href="https://github.com/micro/kubernetes">Kubernetes</a></li>
-  <li><a href="https://github.com/micro/micro/blob/master/.compose.yml">Docker Compose</a></li>
+  <li><a href="https://micro.mu/docs/deploy-local.html">Local</a></li>
+  <li><a href="https://micro.mu/docs/deploy-docker.html">Docker</a></li>
+  <li><a href="https://micro.mu/docs/deploy-kubernetes.html">Kubernetes</a></li>
 </ul>
 
 
@@ -548,7 +559,7 @@
             <div class="row">
                 <div class="col-lg-12 footer">
                &copy; 2019 Micro Services, Inc.<br />
- Last generated: Oct 30, 2019 <br />
+ Last generated: Nov 10, 2019 <br />
                 </div>
             </div>
 </footer>
