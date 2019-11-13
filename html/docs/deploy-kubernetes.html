@@ -475,6 +475,7 @@
 <h2 id="getting-started">Getting Started</h2>
 
 <ul>
+  <li><a href="#dependencies">Dependencies</a></li>
   <li><a href="#install-micro">Install Micro</a></li>
   <li><a href="#writing-a-service">Writing a Service</a></li>
   <li><a href="#deploying-a-service">Deploying a Service</a></li>
@@ -485,28 +486,46 @@
       <li><a href="#k8s-deployment">K8s Deployment</a></li>
     </ul>
   </li>
-  <li><a href="#k8s-load-balancing">K8s Load Balancing</a>
-    <ul>
-      <li><a href="#usage">Usage</a></li>
-      <li><a href="#k8s-deployment-1">K8s Deployment</a></li>
-      <li><a href="#k8s-service">K8s Service</a></li>
-    </ul>
-  </li>
+  <li><a href="#micro-api">Micro API</a></li>
+  <li><a href="#micro-web">Micro Web</a></li>
+  <li><a href="#full-deployment">Full Deployment</a></li>
 </ul>
+
+<h2 id="dependencies">Dependencies</h2>
+
+<p>On kubernetes we would recommend running <a href="https://github.com/etcd-io/etcd">etcd</a> and <a href="https://github.com/nats-io/nats-server">nats</a>.</p>
+
+<ul>
+  <li>Etcd is used for highly scalable service discovery</li>
+  <li>NATS is used for asynchronous messaging</li>
+</ul>
+
+<p>To install etcd (<a href="https://github.com/helm/charts/tree/master/stable/etcd-operator">instructions</a>)</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>helm install --name my-release --set customResources.createEtcdClusterCRD=true stable/etcd-operator
+
+# to later uninstall etcd
+helm delete my-release
+</code></pre></div></div>
+
+<p>To install nats (<a href="https://github.com/nats-io/nats-operator">instructions</a>)</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>kubectl apply -f https://github.com/nats-io/nats-operator/releases/latest/download/00-prereqs.yaml
+kubectl apply -f https://github.com/nats-io/nats-operator/releases/latest/download/10-deployment.yaml
+</code></pre></div></div>
+
+<p>You should now have the required dependencies.</p>
 
 <h2 id="install-micro">Install Micro</h2>
 
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go get github.com/micro/kubernetes/cmd/micro
+<p>Use the below docker image</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>micro/micro
 </code></pre></div></div>
 
-<p>or</p>
+<p>Or use go-micro for development</p>
 
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker pull micro/micro:kubernetes
-</code></pre></div></div>
-
-<p>For go-micro</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>import "github.com/micro/kubernetes/go/micro"
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>github.com/micro/go-micro
 </code></pre></div></div>
 
 <h2 id="writing-a-service">Writing a Service</h2>
@@ -515,11 +534,10 @@
 
 <div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">import</span><span class="x"> </span><span class="p">(</span><span class="x">
 	</span><span class="s">"github.com/micro/go-micro"</span><span class="x">
-	</span><span class="n">k8s</span><span class="x"> </span><span class="s">"github.com/micro/kubernetes/go/micro"</span><span class="x">
 </span><span class="p">)</span><span class="x">
 
 </span><span class="k">func</span><span class="x"> </span><span class="n">main</span><span class="p">()</span><span class="x"> </span><span class="p">{</span><span class="x">
-	</span><span class="n">service</span><span class="x"> </span><span class="o">:=</span><span class="x"> </span><span class="n">k8s</span><span class="o">.</span><span class="n">NewService</span><span class="p">(</span><span class="x">
+	</span><span class="n">service</span><span class="x"> </span><span class="o">:=</span><span class="x"> </span><span class="n">micro</span><span class="o">.</span><span class="n">NewService</span><span class="p">(</span><span class="x">
 		</span><span class="n">micro</span><span class="o">.</span><span class="n">Name</span><span class="p">(</span><span class="s">"greeter"</span><span class="p">)</span><span class="x">
 	</span><span class="p">)</span><span class="x">
 	</span><span class="n">service</span><span class="o">.</span><span class="n">Init</span><span class="p">()</span><span class="x">
@@ -538,28 +556,42 @@ metadata:
   name: greeter
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      name: greeter-srv
+      micro: service
   template:
     metadata:
       labels:
-        app: greeter-srv
+        name: greeter-srv
+        micro: service
     spec:
       containers:
         - name: greeter
           command: [
 		"/greeter-srv",
-		"--server_address=0.0.0.0:8080",
-		"--broker_address=0.0.0.0:10001"
 	  ]
-          image: microhq/greeter-srv:kubernetes
+          image: yourimage/yourservice
           imagePullPolicy: Always
           ports:
           - containerPort: 8080
             name: greeter-port
+          env:
+          - name: MICRO_SERVER_ADDRESS
+            value: "0.0.0.0:8080"
+          - name: MICRO_BROKER
+            value: "nats"
+          - name: MICRO_BROKER_ADDRESS
+            value: "nats-cluster"
+          - name: MICRO_REGISTRY
+            value: "etcd"
+          - name: MICRO_REGISTRY_ADDRESS
+            value: "etcd-cluster-client"
 </code></pre></div></div>
 
 <p>Deploy with kubectl</p>
 
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>kubectl create -f greeter.yaml
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>kubectl apply -f greeter.yaml
 </code></pre></div></div>
 
 <h2 id="healthchecking-sidecar">Healthchecking Sidecar</h2>
@@ -569,12 +601,12 @@ Every go-micro service has a built in Debug.Health endpoint.</p>
 
 <h3 id="install-healthchecker">Install healthchecker</h3>
 
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go get github.com/micro/kubernetes/cmd/health
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go get github.com/micro/cmd/health
 </code></pre></div></div>
 
 <p>or</p>
 
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker pull microhq/health:kubernetes
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker pull microhq/health
 </code></pre></div></div>
 
 <h3 id="run-healtchecker">Run healtchecker</h3>
@@ -600,23 +632,37 @@ metadata:
   name: greeter
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      name: greeter-srv
+      micro: service
   template:
     metadata:
       labels:
-        app: greeter-srv
+        name: greeter-srv
+        micro: service
     spec:
       containers:
         - name: greeter
           command: [
 		"/greeter-srv",
-		"--server_address=0.0.0.0:8080",
-		"--broker_address=0.0.0.0:10001"
 	  ]
-          image: microhq/greeter-srv:kubernetes
+          image: yourimage/yourservice
           imagePullPolicy: Always
           ports:
           - containerPort: 8080
             name: greeter-port
+          env:
+          - name: MICRO_SERVER_ADDRESS
+            value: "0.0.0.0:8080"
+          - name: MICRO_BROKER
+            value: "nats"
+          - name: MICRO_BROKER_ADDRESS
+            value: "nats-cluster"
+          - name: MICRO_REGISTRY
+            value: "etcd"
+          - name: MICRO_REGISTRY_ADDRESS
+            value: "etcd-cluster-client"
         - name: health
           command: [
 		"/health",
@@ -624,7 +670,7 @@ spec:
 		"--server_name=greeter",
 		"--server_address=0.0.0.0:8080"
 	  ]
-          image: microhq/health:kubernetes
+          image: microhq/health
           livenessProbe:
             httpGet:
               path: /health
@@ -633,84 +679,163 @@ spec:
             periodSeconds: 3
 </code></pre></div></div>
 
-<h2 id="k8s-load-balancing">K8s Load Balancing</h2>
+<h2 id="micro-api">Micro API</h2>
 
-<p>Micro includes client side load balancing by default but kubernetes also provides Service load balancing strategies. 
-We can offload load balancing to k8s by using the <a href="https://github.com/micro/go-plugins/tree/master/selector/static">static selector</a> 
-and k8s services.</p>
+<p>To deploy the micro api use the following config. Note the ENABLE_ACME env var where you want Let’s Encrypt SSL by default.</p>
 
-<p>Rather than doing address resolution, the static selector returns the service name plus a fixed port e.g greeter returns greeter:8080. 
-Read about the <a href="https://github.com/micro/go-plugins/tree/master/selector/static">static selector</a>.</p>
-
-<h3 id="usage">Usage</h3>
-
-<p>To use the static selector when running your service specify the flag or env var</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MICRO_SELECTOR=static ./service
-</code></pre></div></div>
-
-<p>or</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./service --selector=static
-</code></pre></div></div>
-
-<h3 id="k8s-deployment-1">K8s Deployment</h3>
-
-<p>An example deployment</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>apiVersion: extensions/v1beta1
-kind: Deployment
-metadata:
-  namespace: default
-  name: greeter
-spec:
-  replicas: 1
-  template:
-    metadata:
-      labels:
-        app: greeter-srv
-    spec:
-      containers:
-        - name: greeter
-          command: [
-		"/greeter-srv",
-		"--selector=static",
-		"--server_address=0.0.0.0:8080",
-		"--broker_address=0.0.0.0:10001"
-	  ]
-          image: microhq/greeter-srv:kubernetes
-          imagePullPolicy: Always
-          ports:
-          - containerPort: 8080
-            name: greeter-port
-</code></pre></div></div>
-
-<h3 id="k8s-service">K8s Service</h3>
-
-<p>The static selector offloads load balancing to k8s services. So ensure you create a k8s Service for each micro service.</p>
-
-<p>Here’s a sample service</p>
+<p>Create the api service</p>
 
 <div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>apiVersion: v1
 kind: Service
 metadata:
-  name: greeter
+  name: micro-api
+  namespace: default
   labels:
-    app: greeter
+    name: micro-api
+    micro: service
 spec:
   ports:
-  - port: 8080
-    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: 443
   selector:
-    app: greeter
+    name: micro-api
+    micro: service
+  type: LoadBalancer
 </code></pre></div></div>
 
-<p>Deploy with kubectl</p>
+<p>Create the deployment</p>
 
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>kubectl create -f service.yaml
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: default
+  name: micro-api
+  labels:
+    micro: service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      name: micro-api
+      micro: service
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        name: micro-api
+        micro: service
+    spec:
+      containers:
+      - name: api
+        env:
+        - name: MICRO_ENABLE_STATS
+          value: "true"
+        - name: MICRO_BROKER
+          value: "nats"
+        - name: MICRO_BROKER_ADDRESS
+          value: "nats-cluster"
+        - name: MICRO_REGISTRY
+          value: "etcd"
+        - name: MICRO_REGISTRY_ADDRESS
+          value: "etcd-cluster-client"
+        - name: MICRO_REGISTER_TTL
+          value: "60"
+        - name: MICRO_REGISTER_INTERVAL
+          value: "30"
+        - name: MICRO_ENABLE_ACME
+          value: "true"
+        args:
+        - api
+        image: micro/micro
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 443
+          name: api-port
 </code></pre></div></div>
 
-<p>Calling micro service “greeter” from your service will route to the k8s service greeter:8080.</p>
+<h2 id="micro-web">Micro Web</h2>
+
+<p>To deploy the micro web use the following config. Note the ENABLE_ACME env var where you want Let’s Encrypt SSL by default.</p>
+
+<p>Create the service</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>apiVersion: v1
+kind: Service
+metadata:
+  name: micro-web
+  namespace: default
+  labels:
+    name: micro-web
+    micro: service
+spec:
+  ports:
+  - name: https
+    port: 443
+    targetPort: 443
+  selector:
+    name: micro-web
+    micro: service
+  type: LoadBalancer
+</code></pre></div></div>
+
+<p>Create the deployment</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: default
+  name: micro-web
+  labels:
+    micro: service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: micro-web
+      micro: service
+  template:
+    metadata:
+      labels:
+        name: micro-web
+        micro: service
+    spec:
+      containers:
+      - name: web
+        env:
+        - name: MICRO_BROKER
+          value: "nats"
+        - name: MICRO_BROKER_ADDRESS
+          value: "nats-cluster"
+        - name: MICRO_ENABLE_STATS
+          value: "true"
+        - name: MICRO_REGISTRY
+          value: "etcd"
+        - name: MICRO_REGISTRY_ADDRESS
+          value: "etcd-cluster-client"
+        - name: MICRO_ENABLE_ACME
+          value: "true"
+        - name: MICRO_ACME_PROVIDER
+          value: certmagic
+        args:
+        - web
+        image: micro/micro
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 443
+          name: web-port
+</code></pre></div></div>
+
+<h2 id="full-deployment">Full Deployment</h2>
+
+<p>For the full deployment config used by <a href="https://micro.mu">micro.mu</a> for the cloud platform see:</p>
+
+<p><a href="https://github.com/micro/micro/tree/master/network/config/kubernetes">https://github.com/micro/micro/tree/master/network/config/kubernetes</a></p>
+
+<p>Some of this config is specific to the needs of Micro itself including the use of CloudFlare.</p>
 
 
 
@@ -734,7 +859,7 @@ spec:
             <div class="row">
                 <div class="col-lg-12 footer">
                &copy; 2019 Micro Services, Inc.<br />
- Last generated: Nov 10, 2019 <br />
+ Last generated: Nov 13, 2019 <br />
                 </div>
             </div>
 </footer>
