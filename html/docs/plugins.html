@@ -324,6 +324,13 @@
             
             
             
+            
+            
+            <li><a href="/docs/run-service.html">Run Service</a></li>
+            
+            
+            
+            
         </ul>
         
         
@@ -411,6 +418,13 @@
             
             
             
+            
+            
+            <li><a href="/docs/local-development.html">Local Development</a></li>
+            
+            
+            
+            
         </ul>
         
         
@@ -472,24 +486,72 @@
 
   <p>Micro provides a pluggable architecture for all tooling. This means underlying implementations can be swapped out.</p>
 
-<p>Go-Micro and the Micro toolkit include separate types of plugins. Navigate from the sidebar to learn more about each.</p>
+<p>Go Micro and the Micro toolkit include separate types of plugins. Navigate from the sidebar to learn more about each.</p>
+
+<h2 id="overview">Overview</h2>
+
+<p>At a high level plugins provide the opportunity to swap out underlying infrastructure and dependencies. This means 
+a microservice can be written in one way and run locally with zero dependencies but then equally run as a highly 
+resilient system in the cloud when using distributed systems to underpin its usage.</p>
+
+<h2 id="usage">Usage</h2>
+
+<p>By default go-micro only provides a few implementation of each interface at the core but it’s completely pluggable. 
+There’s already dozens of plugins which are available at <a href="https://github.com/micro/go-plugins">github.com/micro/go-plugins</a>. 
+Contributions are welcome! Plugins ensure that your Go Micro services live on long after technology evolves.</p>
+
+<p>If you want to integrate plugins simply link them in a separate file and rebuild.</p>
+
+<p>Create a plugins.go file and import the plugins you want:</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">package</span><span class="x"> </span><span class="n">main</span><span class="x">
+
+</span><span class="k">import</span><span class="x"> </span><span class="p">(</span><span class="x">
+        </span><span class="c">// consul registry</span><span class="x">
+        </span><span class="n">_</span><span class="x"> </span><span class="s">"github.com/micro/go-plugins/registry/consul"</span><span class="x">
+        </span><span class="c">// rabbitmq transport</span><span class="x">
+        </span><span class="n">_</span><span class="x"> </span><span class="s">"github.com/micro/go-plugins/transport/rabbitmq"</span><span class="x">
+        </span><span class="c">// kafka broker</span><span class="x">
+        </span><span class="n">_</span><span class="x"> </span><span class="s">"github.com/micro/go-plugins/broker/kafka"</span><span class="x">
+</span><span class="p">)</span><span class="x">
+</span></code></pre></div></div>
+
+<h2 id="write-plugins">Write Plugins</h2>
+
+<p>Plugins are a concept built on Go’s interface. Each package maintains a high level interface abstraction. 
+Simply implement the interface and pass it in as an option to the service.</p>
+
+<p>The service discovery interface is called <a href="https://godoc.org/github.com/micro/go-micro/registry#Registry">Registry</a>. 
+Anything which implements this interface can be used as a registry. The same applies to the other packages.</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">type</span><span class="x"> </span><span class="n">Registry</span><span class="x"> </span><span class="k">interface</span><span class="x"> </span><span class="p">{</span><span class="x">
+    </span><span class="n">Register</span><span class="p">(</span><span class="o">*</span><span class="n">Service</span><span class="p">,</span><span class="x"> </span><span class="o">...</span><span class="n">RegisterOption</span><span class="p">)</span><span class="x"> </span><span class="kt">error</span><span class="x">
+    </span><span class="n">Deregister</span><span class="p">(</span><span class="o">*</span><span class="n">Service</span><span class="p">)</span><span class="x"> </span><span class="kt">error</span><span class="x">
+    </span><span class="n">GetService</span><span class="p">(</span><span class="kt">string</span><span class="p">)</span><span class="x"> </span><span class="p">([]</span><span class="o">*</span><span class="n">Service</span><span class="p">,</span><span class="x"> </span><span class="kt">error</span><span class="p">)</span><span class="x">
+    </span><span class="n">ListServices</span><span class="p">()</span><span class="x"> </span><span class="p">([]</span><span class="o">*</span><span class="n">Service</span><span class="p">,</span><span class="x"> </span><span class="kt">error</span><span class="p">)</span><span class="x">
+    </span><span class="n">Watch</span><span class="p">()</span><span class="x"> </span><span class="p">(</span><span class="n">Watcher</span><span class="p">,</span><span class="x"> </span><span class="kt">error</span><span class="p">)</span><span class="x">
+    </span><span class="n">String</span><span class="p">()</span><span class="x"> </span><span class="kt">string</span><span class="x">
+</span><span class="p">}</span><span class="x">
+</span></code></pre></div></div>
+
+<p>Browse <a href="https://github.com/micro/go-plugins">go-plugins</a> to get a better idea of implementation details.</p>
 
 <h2 id="examples">Examples</h2>
 
-<h3 id="go-micro">Go Micro</h3>
+<h3 id="framework">Framework</h3>
 
 <ul>
-  <li><a href="https://github.com/micro/go-plugins/tree/master/registry/etcd">Etcd Registry</a> - Service discovery using Etcd</li>
+  <li><a href="https://github.com/micro/go-plugins/tree/master/registry/consul">Consul Registry</a> - Service discovery using Consul</li>
   <li><a href="https://github.com/micro/go-plugins/tree/master/registry/kubernetes">K8s Registry</a> - Service discovery using Kubernetes</li>
   <li><a href="https://github.com/micro/go-plugins/tree/master/broker/kafka">Kafka Broker</a> - Kafka message broker</li>
 </ul>
 
-<h3 id="toolkit">Toolkit</h3>
+<h3 id="runtime">Runtime</h3>
 
 <ul>
   <li><a href="https://github.com/micro/go-plugins/tree/master/micro/router">Router</a> - Configurable http routing and proxying</li>
   <li><a href="https://github.com/micro/go-plugins/tree/master/micro/trace/awsxray">AWS X-Ray</a> - Tracing integration for AWS X-Ray</li>
-  <li><a href="https://github.com/micro/go-plugins/tree/master/micro/ip_whitelist">IP Whitelite</a> - Whitelisting IP address access</li>
+  <li><a href="https://github.com/micro/go-plugins/tree/master/micro/ip_whitelist">IP Whitelist</a> - Whitelisting IP address access</li>
 </ul>
 
 <h2 id="repository">Repository</h2>
@@ -518,7 +580,7 @@
             <div class="row">
                 <div class="col-lg-12 footer">
                &copy; 2019 Micro Services, Inc.<br />
- Last generated: Nov 13, 2019 <br />
+ Last generated: Nov 14, 2019 <br />
                 </div>
             </div>
 </footer>

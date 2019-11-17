@@ -5,11 +5,11 @@
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description"
-    content="The micro tunnel is a point to point tunnel.">
-<meta name="keywords" content="tunnel,  tunnel">
+    content="Run a service with the micro runtime">
+<meta name="keywords" content="microruntimedev,  runtime">
 
 
-<title>Service Tunnel | Micro</title>
+<title>Local Development | Micro</title>
 
 
 <link rel="stylesheet" href="/docs/css/syntax.css">
@@ -298,7 +298,7 @@
             
             
             
-            <li class="active highlight"><a href="/docs/tunnel.html">Service Tunnel</a></li>
+            <li><a href="/docs/tunnel.html">Service Tunnel</a></li>
             
             
             
@@ -420,7 +420,7 @@
             
             
             
-            <li><a href="/docs/local-development.html">Local Development</a></li>
+            <li class="active highlight"><a href="/docs/local-development.html">Local Development</a></li>
             
             
             
@@ -473,7 +473,7 @@
                 <!-- Content Column -->
                 <div class="col-md-9">
                     <div class="post-header">
-   <h1 class="post-title-main">Service Tunnel</h1>
+   <h1 class="post-title-main">Local Development</h1>
 </div>
 
 
@@ -481,56 +481,49 @@
 <div class="post-content">
 
    
-    <div class="summary">The micro tunnel is a point to point tunnel.</div>
+    <div class="summary">Run a service with the micro runtime</div>
    
 
     
 
-  <p>A service tunnel is a point to point tunnel used for accessing services in remote environments.</p>
+  <p>The micro runtime provides a way to manage the lifecycle of services without the complexity of orchestration systems. 
+By default it provides a simple local process manager which starts your service, watches for changes and rebuilds 
+as required.</p>
 
-<p><img src="images/tunnel.svg" /></p>
+<p>You can start the service with one command</p>
 
-<h2 id="overview">Overview</h2>
-
-<p>The micro tunnel provides a way to access services across remote environments. This is great where you want to tunnel to staging, prod 
-or expose local services externally without using something like openvpn or wireguard which would expose all things in your network.</p>
-
-<h2 id="run-tunnel">Run Tunnel</h2>
-
-<p>Start the tunnel server (Runs on port :8083)</p>
-
-<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>micro tunnel
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>micro run service
 </code></pre></div></div>
 
-<h2 id="tunnel-services">Tunnel Services</h2>
+<h2 id="usage">Usage</h2>
 
-<p>Now the tunnel is running you can connect to it with a local tunnel.</p>
+<p>To run and manage your service locally do the following.</p>
 
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>micro tunnel --server=remote.env:8083
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code># cd to your service directory e.g examples/greeter/srv
+cd examples/greeter/srv
+
+# run the service
+micro run service
+
+# edit a file
+sed -i '1 i\// Package main' main.go
 </code></pre></div></div>
 
-<p>Any request now made through the tunnel will be proxied to a service on the other side.</p>
+<p>Watch as your service is started, sees the file change, rebuilds and starts again.</p>
 
-<p>Set your proxy to use the tunnel</p>
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MICRO_PROXY=go.micro.tunnel go run main.go
-</code></pre></div></div>
+<h2 id="todo">TODO</h2>
 
-<p>Your service will direct all traffic through the tunnel.</p>
-
-<h2 id="authentication">Authentication</h2>
-
-<p>Specify a tunnel token to limit access to who can tunnel into the environment. Tokens must match between 
-tunnel clients and servers otherwise the connection is rejected.</p>
-
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MICRO_TUNNEL_TOKEN=foobar go run main.go
-</code></pre></div></div>
-
-<p>By default the token “micro” is used allowing anyone to connect via the tunnel.</p>
+<p>We’ll be adding the ability to send the command to run a service to the <code class="highlighter-rouge">micro runtime</code> service as well as 
+querying status, killing the service, etc.</p>
 
 
 
 <!--
     <div class="tags">
+        
+        
+        
+        
         
         
         

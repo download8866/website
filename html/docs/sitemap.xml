@@ -262,6 +262,12 @@
   
   
   <url>
+    <loc>https://micro.mu/docs/local-development.html</loc>
+  </url>
+  
+  
+  
+  <url>
     <loc>https://micro.mu/docs/micro-service.html</loc>
   </url>
   
@@ -377,6 +383,12 @@
   
   <url>
     <loc>https://micro.mu/docs/roadmap.html</loc>
+  </url>
+  
+  
+  
+  <url>
+    <loc>https://micro.mu/docs/run-service.html</loc>
   </url>
   
   

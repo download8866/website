@@ -324,6 +324,13 @@
             
             
             
+            
+            
+            <li><a href="/docs/run-service.html">Run Service</a></li>
+            
+            
+            
+            
         </ul>
         
         
@@ -407,6 +414,13 @@
             
             
             <li><a href="/docs/fault-tolerance.html">Fault Tolerance</a></li>
+            
+            
+            
+            
+            
+            
+            <li><a href="/docs/local-development.html">Local Development</a></li>
             
             
             
@@ -517,8 +531,13 @@ are pluggable and allows Go Micro to be runtime agnostic. You can plugin any und
 <h2 id="getting-started">Getting started</h2>
 
 <ul>
-  <li><a href="#install-protobuf">Install Protobuf</a></li>
-  <li><a href="#service-discovery">Service Discovery</a></li>
+  <li><a href="#dependencies">Dependencies</a>
+    <ul>
+      <li><a href="#protobuf">Protobuf</a></li>
+      <li><a href="#discovery">Discovery</a></li>
+    </ul>
+  </li>
+  <li><a href="#installation">Installation</a></li>
   <li><a href="#writing-a-service">Writing a Service</a></li>
   <li><a href="#publish--subscribe">Publish &amp; Subscribe</a></li>
   <li><a href="#plugins">Plugins</a></li>
@@ -526,9 +545,15 @@ are pluggable and allows Go Micro to be runtime agnostic. You can plugin any und
   <li><a href="#examples">Examples</a></li>
 </ul>
 
-<h2 id="install-protobuf">Install Protobuf</h2>
+<h2 id="dependencies">Dependencies</h2>
 
-<p>Protobuf is required for code generation</p>
+<p>Go Micro makes use of protobuf by default. This is so we can code generate boilerplate code and also provide 
+an efficient wire format for transferring data back and forth between services.</p>
+
+<p>We also require some form of service discovery to resolve service names to their addresses along with 
+metadata and endpoint information. See below for more info.</p>
+
+<h3 id="protobuf">Protobuf</h3>
 
 <p>You’ll need to install:</p>
 
@@ -536,11 +561,10 @@ are pluggable and allows Go Micro to be runtime agnostic. You can plugin any und
   <li><a href="https://github.com/micro/protoc-gen-micro">protoc-gen-micro</a></li>
 </ul>
 
-<h2 id="service-discovery">Service Discovery</h2>
+<h3 id="discovery">Discovery</h3>
 
-<p>Service discovery is used to resolve service names to addresses.</p>
-
-<p>The default discovery system is multicast DNS which requires zeroconf. If you want something more resilient and multi-host then use consul.</p>
+<p>Service discovery is used to resolve service names to addresses. By default we provide a zeroconf discovery system 
+using multicast DNS. This comes built-in on most operating systems. If you need something more resilient and multi-host then use etcd.</p>
 
 <h3 id="etcd">Etcd</h3>
 
@@ -556,49 +580,69 @@ are pluggable and allows Go Micro to be runtime agnostic. You can plugin any und
 
 <p>Discovery is pluggable. Find plugins for consul, kubernetes, zookeeper and more in the <a href="https://github.com/micro/go-plugins">micro/go-plugins</a> repo.</p>
 
+<h2 id="installation">Installation</h2>
+
+<p>Go Micro is a framework for Go based development. You can easily get this with the go toolchain.</p>
+
+<p>Import go-micro in your service</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>import "github.com/micro/go-micro"
+</code></pre></div></div>
+
+<p>We provide release tags and would recommend to stick with the latest stable releases. Making use of go modules will enable this.</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code># enable go modules
+export GO111MODULE=on
+# initialise go modules in your app
+go mod init
+# now go get
+go get ./...
+</code></pre></div></div>
+
 <h2 id="writing-a-service">Writing a service</h2>
 
-<p>This is a simple greeter RPC service example</p>
+<p>Writing a service is incredibly simple with Go Micro. It provides you the framework to move fast without needing to understand 
+everything at first. Below is a simple greeter service example that we’ll run through.</p>
 
-<p>Find this example at <a href="https://github.com/micro/examples/tree/master/service">examples/service</a>.</p>
+<p>Find the full example code at <a href="https://github.com/micro/examples/tree/master/service">examples/service</a>.</p>
 
-<h3 id="create-service-proto">Create service proto</h3>
+<h3 id="service-proto">Service Proto</h3>
 
 <p>One of the key requirements of microservices is strongly defined interfaces. Micro uses protobuf to achieve this.</p>
 
-<p>Here we define the Greeter handler with the method Hello. It takes a HelloRequest and HelloResponse both with one string arguments.</p>
+<p>Here we define the Greeter handler with the method Hello. It takes a Request and Response both with one string arguments.</p>
 
 <div class="language-proto highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="na">syntax</span> <span class="o">=</span> <span class="s">"proto3"</span><span class="p">;</span>
 
 <span class="kd">service</span> <span class="n">Greeter</span> <span class="p">{</span>
-	<span class="k">rpc</span> <span class="n">Hello</span><span class="p">(</span><span class="n">HelloRequest</span><span class="p">)</span> <span class="k">returns</span> <span class="p">(</span><span class="n">HelloResponse</span><span class="p">)</span> <span class="p">{}</span>
+	<span class="k">rpc</span> <span class="n">Hello</span><span class="p">(</span><span class="n">Request</span><span class="p">)</span> <span class="k">returns</span> <span class="p">(</span><span class="n">Response</span><span class="p">)</span> <span class="p">{}</span>
 <span class="p">}</span>
 
-<span class="kd">message</span> <span class="nc">HelloRequest</span> <span class="p">{</span>
+<span class="kd">message</span> <span class="nc">Request</span> <span class="p">{</span>
 	<span class="kt">string</span> <span class="na">name</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span>
 <span class="p">}</span>
 
-<span class="kd">message</span> <span class="nc">HelloResponse</span> <span class="p">{</span>
+<span class="kd">message</span> <span class="nc">Response</span> <span class="p">{</span>
 	<span class="kt">string</span> <span class="na">greeting</span> <span class="o">=</span> <span class="mi">2</span><span class="p">;</span>
 <span class="p">}</span>
 </code></pre></div></div>
 
-<h3 id="generate-the-proto">Generate the proto</h3>
+<h3 id="generate-proto">Generate Proto</h3>
 
 <p>After writing the proto definition we must compile it using protoc with the micro plugin.</p>
 
 <div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>protoc <span class="nt">--proto_path</span><span class="o">=</span><span class="nv">$GOPATH</span>/src:. <span class="nt">--micro_out</span><span class="o">=</span><span class="nb">.</span> <span class="nt">--go_out</span><span class="o">=</span><span class="nb">.</span> path/to/greeter.proto
 </code></pre></div></div>
 
-<h3 id="write-the-service">Write the service</h3>
+<h3 id="implement-service">Implement Service</h3>
 
-<p>Below is the code for the greeter service.</p>
+<p>Now that we’ve defined the service interface we need to implement the service.</p>
 
-<p>It does the following:</p>
+<p>Below is the code for the greeter service. It does the following:</p>
 
 <ol>
   <li>Implements the interface defined for the Greeter handler</li>
-  <li>Initialises a micro.Service</li>
+  <li>Initialises a <a href="https://godoc.org/github.com/micro/go-micro#Service">micro.Service</a></li>
   <li>Registers the Greeter handler</li>
   <li>Runs the service</li>
 </ol>
@@ -615,7 +659,7 @@ are pluggable and allows Go Micro to be runtime agnostic. You can plugin any und
 
 </span><span class="k">type</span><span class="x"> </span><span class="n">Greeter</span><span class="x"> </span><span class="k">struct</span><span class="p">{}</span><span class="x">
 
-</span><span class="k">func</span><span class="x"> </span><span class="p">(</span><span class="n">g</span><span class="x"> </span><span class="o">*</span><span class="n">Greeter</span><span class="p">)</span><span class="x"> </span><span class="n">Hello</span><span class="p">(</span><span class="n">ctx</span><span class="x"> </span><span class="n">context</span><span class="o">.</span><span class="n">Context</span><span class="p">,</span><span class="x"> </span><span class="n">req</span><span class="x"> </span><span class="o">*</span><span class="n">proto</span><span class="o">.</span><span class="n">HelloRequest</span><span class="p">,</span><span class="x"> </span><span class="n">rsp</span><span class="x"> </span><span class="o">*</span><span class="n">proto</span><span class="o">.</span><span class="n">HelloResponse</span><span class="p">)</span><span class="x"> </span><span class="kt">error</span><span class="x"> </span><span class="p">{</span><span class="x">
+</span><span class="k">func</span><span class="x"> </span><span class="p">(</span><span class="n">g</span><span class="x"> </span><span class="o">*</span><span class="n">Greeter</span><span class="p">)</span><span class="x"> </span><span class="n">Hello</span><span class="p">(</span><span class="n">ctx</span><span class="x"> </span><span class="n">context</span><span class="o">.</span><span class="n">Context</span><span class="p">,</span><span class="x"> </span><span class="n">req</span><span class="x"> </span><span class="o">*</span><span class="n">proto</span><span class="o">.</span><span class="n">Request</span><span class="p">,</span><span class="x"> </span><span class="n">rsp</span><span class="x"> </span><span class="o">*</span><span class="n">proto</span><span class="o">.</span><span class="n">Response</span><span class="p">)</span><span class="x"> </span><span class="kt">error</span><span class="x"> </span><span class="p">{</span><span class="x">
 	</span><span class="n">rsp</span><span class="o">.</span><span class="n">Greeting</span><span class="x"> </span><span class="o">=</span><span class="x"> </span><span class="s">"Hello "</span><span class="x"> </span><span class="o">+</span><span class="x"> </span><span class="n">req</span><span class="o">.</span><span class="n">Name</span><span class="x">
 	</span><span class="k">return</span><span class="x"> </span><span class="no">nil</span><span class="x">
 </span><span class="p">}</span><span class="x">
@@ -639,19 +683,24 @@ are pluggable and allows Go Micro to be runtime agnostic. You can plugin any und
 </span><span class="p">}</span><span class="x">
 </span></code></pre></div></div>
 
-<h3 id="run-service">Run service</h3>
+<h3 id="run-service">Run Service</h3>
+
+<p>Now run the example using Go. If you’re working with the example code do the following:</p>
+
 <div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go run examples/service/main.go
 </code></pre></div></div>
 
-<p>Output</p>
-<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>2016/03/14 10:59:14 Listening on [::]:50137
-2016/03/14 10:59:14 Broker Listening on [::]:50138
-2016/03/14 10:59:14 Registering node: greeter-ca62b017-e9d3-11e5-9bbb-68a86d0d36b6
+<p>This should output something like the folloing</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>2019-11-13 21:39:38.327452 I | Transport [http] Listening on [::]:32945
+2019-11-13 21:39:38.327548 I | Broker [http] Connected to [::]:38955
+2019-11-13 21:39:38.328095 I | Registry [mdns] Registering node: greeter-39373107-5ae7-42a2-b5e2-ebebf7eafbd9
 </code></pre></div></div>
 
-<h3 id="define-a-client">Define a client</h3>
+<h3 id="write-client">Write Client</h3>
 
-<p>Below is the client code to query the greeter service.</p>
+<p>Once we’ve got a service we actually need a way to query it. This is at the heart of microservices as we not 
+only serve but also consume other services. Below is the client code to query the greeter service.</p>
 
 <p>The generated proto includes a greeter client to reduce boilerplate code.</p>
 
@@ -665,17 +714,17 @@ are pluggable and allows Go Micro to be runtime agnostic. You can plugin any und
 	</span><span class="n">proto</span><span class="x"> </span><span class="s">"github.com/micro/examples/service/proto"</span><span class="x">
 </span><span class="p">)</span><span class="x">
 
-
 </span><span class="k">func</span><span class="x"> </span><span class="n">main</span><span class="p">()</span><span class="x"> </span><span class="p">{</span><span class="x">
-	</span><span class="c">// Create a new service. Optionally include some options here.</span><span class="x">
+	</span><span class="c">// Create a new service</span><span class="x">
 	</span><span class="n">service</span><span class="x"> </span><span class="o">:=</span><span class="x"> </span><span class="n">micro</span><span class="o">.</span><span class="n">NewService</span><span class="p">(</span><span class="n">micro</span><span class="o">.</span><span class="n">Name</span><span class="p">(</span><span class="s">"greeter.client"</span><span class="p">))</span><span class="x">
+	</span><span class="c">// Initialise the client and parse command line flags</span><span class="x">
 	</span><span class="n">service</span><span class="o">.</span><span class="n">Init</span><span class="p">()</span><span class="x">
 
 	</span><span class="c">// Create new greeter client</span><span class="x">
 	</span><span class="n">greeter</span><span class="x"> </span><span class="o">:=</span><span class="x"> </span><span class="n">proto</span><span class="o">.</span><span class="n">NewGreeterService</span><span class="p">(</span><span class="s">"greeter"</span><span class="p">,</span><span class="x"> </span><span class="n">service</span><span class="o">.</span><span class="n">Client</span><span class="p">())</span><span class="x">
 
 	</span><span class="c">// Call the greeter</span><span class="x">
-	</span><span class="n">rsp</span><span class="p">,</span><span class="x"> </span><span class="n">err</span><span class="x"> </span><span class="o">:=</span><span class="x"> </span><span class="n">greeter</span><span class="o">.</span><span class="n">Hello</span><span class="p">(</span><span class="n">context</span><span class="o">.</span><span class="n">TODO</span><span class="p">(),</span><span class="x"> </span><span class="o">&amp;</span><span class="n">proto</span><span class="o">.</span><span class="n">HelloRequest</span><span class="p">{</span><span class="n">Name</span><span class="o">:</span><span class="x"> </span><span class="s">"John"</span><span class="p">})</span><span class="x">
+	</span><span class="n">rsp</span><span class="p">,</span><span class="x"> </span><span class="n">err</span><span class="x"> </span><span class="o">:=</span><span class="x"> </span><span class="n">greeter</span><span class="o">.</span><span class="n">Hello</span><span class="p">(</span><span class="n">context</span><span class="o">.</span><span class="n">TODO</span><span class="p">(),</span><span class="x"> </span><span class="o">&amp;</span><span class="n">proto</span><span class="o">.</span><span class="n">Request</span><span class="p">{</span><span class="n">Name</span><span class="o">:</span><span class="x"> </span><span class="s">"John"</span><span class="p">})</span><span class="x">
 	</span><span class="k">if</span><span class="x"> </span><span class="n">err</span><span class="x"> </span><span class="o">!=</span><span class="x"> </span><span class="no">nil</span><span class="x"> </span><span class="p">{</span><span class="x">
 		</span><span class="n">fmt</span><span class="o">.</span><span class="n">Println</span><span class="p">(</span><span class="n">err</span><span class="p">)</span><span class="x">
 	</span><span class="p">}</span><span class="x">
@@ -685,23 +734,25 @@ are pluggable and allows Go Micro to be runtime agnostic. You can plugin any und
 </span><span class="p">}</span><span class="x">
 </span></code></pre></div></div>
 
-<h3 id="run-the-client">Run the client</h3>
+<p>Now run the client</p>
 
 <div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go run client.go
 </code></pre></div></div>
 
-<p>Output</p>
+<p>And the output should simply print the response</p>
+
 <div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Hello John
 </code></pre></div></div>
 
 <h2 id="publish--subscribe">Publish &amp; Subscribe</h2>
 
-<p>Go-micro has a built in message broker interface for event driven architectures.</p>
+<p>Microservices is an event driven architecture patterna and so Go Micro builds in the concept of asynchronous messaging 
+using a message broker interface. It seamlessly operates on protobuf types for you. Automatically encoding and decoding 
+messages as they are sent and received from the broker.</p>
 
-<p>PubSub operates on the same protobuf generated messages as RPC. They are encoded/decoded automatically and sent via the broker. 
-By default go-micro includes a point-to-point http broker but this can be swapped out via go-plugins.</p>
+<p>By default go-micro includes a point-to-point http broker but this can be swapped out via <a href="https://github.com/micro/go-plugins">go-plugins</a>.</p>
 
-<h3 id="publish">Publish</h3>
+<h3 id="publish-message">Publish Message</h3>
 
 <p>Create a new publisher with a <code class="highlighter-rouge">topic</code> name and service client</p>
 
@@ -732,53 +783,69 @@ By default go-micro includes a point-to-point http broker but this can be swappe
 
 <h2 id="plugins">Plugins</h2>
 
-<p>By default go-micro only provides a few implementation of each interface at the core but it’s completely pluggable. There’s already dozens of plugins which are available at <a href="https://github.com/micro/go-plugins">github.com/micro/go-plugins</a>. Contributions are welcome!</p>
+<p>By default go-micro only provides a few implementation of each interface at the core but it’s completely pluggable. 
+There’s already dozens of plugins which are available at <a href="https://github.com/micro/go-plugins">github.com/micro/go-plugins</a>. 
+Contributions are welcome! Plugins ensure that your Go Micro services live on long after technology evolves.</p>
 
-<h3 id="build-with-plugins">Build with plugins</h3>
+<h3 id="add-plugins">Add plugins</h3>
 
 <p>If you want to integrate plugins simply link them in a separate file and rebuild</p>
 
-<p>Create a plugins.go file</p>
+<p>Create a plugins.go file and import the plugins you want:</p>
 
-<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">import</span><span class="x"> </span><span class="p">(</span><span class="x">
-        </span><span class="c">// etcd v3 registry</span><span class="x">
-        </span><span class="n">_</span><span class="x"> </span><span class="s">"github.com/micro/go-plugins/registry/etcdv3"</span><span class="x">
-        </span><span class="c">// nats transport</span><span class="x">
-        </span><span class="n">_</span><span class="x"> </span><span class="s">"github.com/micro/go-plugins/transport/nats"</span><span class="x">
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">package</span><span class="x"> </span><span class="n">main</span><span class="x">
+
+</span><span class="k">import</span><span class="x"> </span><span class="p">(</span><span class="x">
+        </span><span class="c">// consul registry</span><span class="x">
+        </span><span class="n">_</span><span class="x"> </span><span class="s">"github.com/micro/go-plugins/registry/consul"</span><span class="x">
+        </span><span class="c">// rabbitmq transport</span><span class="x">
+        </span><span class="n">_</span><span class="x"> </span><span class="s">"github.com/micro/go-plugins/transport/rabbitmq"</span><span class="x">
         </span><span class="c">// kafka broker</span><span class="x">
         </span><span class="n">_</span><span class="x"> </span><span class="s">"github.com/micro/go-plugins/broker/kafka"</span><span class="x">
 </span><span class="p">)</span><span class="x">
 </span></code></pre></div></div>
 
-<p>Build binary</p>
+<p>Build your application by including the plugins file:</p>
 
-<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>// For <span class="nb">local </span>use
-go build <span class="nt">-i</span> <span class="nt">-o</span> service ./main.go ./plugins.go
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># assuming files main.go and plugins.go are in the top level dir</span>
+ 
+<span class="c"># For local use</span>
+go build <span class="nt">-o</span> service <span class="k">*</span>.go
 </code></pre></div></div>
 
-<p>Flag usage of plugins</p>
+<p>Flag usage of plugins:</p>
+
 <div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>service <span class="nt">--registry</span><span class="o">=</span>etcdv3 <span class="nt">--transport</span><span class="o">=</span>nats <span class="nt">--broker</span><span class="o">=</span>kafka
 </code></pre></div></div>
 
-<h3 id="plugin-as-option">Plugin as option</h3>
+<p>Or what’s preferred is using environment variables for 12-factor apps</p>
 
-<p>Alternatively you can set the plugin as an option to a service</p>
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MICRO_REGISTRY=consul \
+MICRO_TRANSPORT=rabbitmq \
+MICRO_BROKER=kafka \
+service
+</code></pre></div></div>
 
-<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="x">
+<h3 id="plugin-option">Plugin Option</h3>
+
+<p>Alternatively you can set the plugin as an option to a service directly in code</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">package</span><span class="x"> </span><span class="n">main</span><span class="x">
+
 </span><span class="k">import</span><span class="x"> </span><span class="p">(</span><span class="x">
         </span><span class="s">"github.com/micro/go-micro"</span><span class="x"> 
-        </span><span class="c">// etcd v3 registry</span><span class="x">
-        </span><span class="s">"github.com/micro/go-plugins/registry/etcdv3"</span><span class="x">
-        </span><span class="c">// nats transport</span><span class="x">
-        </span><span class="s">"github.com/micro/go-plugins/transport/nats"</span><span class="x">
+        </span><span class="c">// consul registry</span><span class="x">
+        </span><span class="s">"github.com/micro/go-plugins/registry/consul"</span><span class="x">
+        </span><span class="c">// rabbitmq transport</span><span class="x">
+        </span><span class="s">"github.com/micro/go-plugins/transport/rabbitmq"</span><span class="x">
         </span><span class="c">// kafka broker</span><span class="x">
         </span><span class="s">"github.com/micro/go-plugins/broker/kafka"</span><span class="x">
 </span><span class="p">)</span><span class="x">
 
 </span><span class="k">func</span><span class="x"> </span><span class="n">main</span><span class="p">()</span><span class="x"> </span><span class="p">{</span><span class="x">
-	</span><span class="n">registry</span><span class="x"> </span><span class="o">:=</span><span class="x"> </span><span class="n">etcdv3</span><span class="o">.</span><span class="n">NewRegistry</span><span class="p">()</span><span class="x">
+	</span><span class="n">registry</span><span class="x"> </span><span class="o">:=</span><span class="x"> </span><span class="n">consul</span><span class="o">.</span><span class="n">NewRegistry</span><span class="p">()</span><span class="x">
 	</span><span class="n">broker</span><span class="x"> </span><span class="o">:=</span><span class="x"> </span><span class="n">kafka</span><span class="o">.</span><span class="n">NewBroker</span><span class="p">()</span><span class="x">
-	</span><span class="n">transport</span><span class="x"> </span><span class="o">:=</span><span class="x"> </span><span class="n">nats</span><span class="o">.</span><span class="n">NewTransport</span><span class="p">()</span><span class="x">
+	</span><span class="n">transport</span><span class="x"> </span><span class="o">:=</span><span class="x"> </span><span class="n">rabbimq</span><span class="o">.</span><span class="n">NewTransport</span><span class="p">()</span><span class="x">
 
         </span><span class="n">service</span><span class="x"> </span><span class="o">:=</span><span class="x"> </span><span class="n">micro</span><span class="o">.</span><span class="n">NewService</span><span class="p">(</span><span class="x">
                 </span><span class="n">micro</span><span class="o">.</span><span class="n">Name</span><span class="p">(</span><span class="s">"greeter"</span><span class="p">),</span><span class="x">
@@ -792,7 +859,7 @@ go build <span class="nt">-i</span> <span class="nt">-o</span> service ./main.go
 </span><span class="p">}</span><span class="x">
 </span></code></pre></div></div>
 
-<h3 id="write-plugins">Write plugins</h3>
+<h3 id="write-plugins">Write Plugins</h3>
 
 <p>Plugins are a concept built on Go’s interface. Each package maintains a high level interface abstraction. 
 Simply implement the interface and pass it in as an option to the service.</p>
@@ -814,7 +881,8 @@ Anything which implements this interface can be used as a registry. The same app
 
 <h2 id="wrappers">Wrappers</h2>
 
-<p>Go-micro includes the notion of middleware as wrappers. The client or handlers can be wrapped using the decorator pattern.</p>
+<p>Go Micro includes the notion of middleware as wrappers to extend the functionality of your code and integrate 
+external requirements. The client or handlers can be wrapped using what’s known as the decorator pattern.</p>
 
 <h3 id="handler">Handler</h3>
 
@@ -868,11 +936,11 @@ Anything which implements this interface can be used as a registry. The same app
 
 <h2 id="examples">Examples</h2>
 
-<p>An example service can be found in <a href="https://github.com/micro/examples/tree/master/service"><strong>examples/service</strong></a> and function in <a href="https://github.com/micro/examples/tree/master/function"><strong>examples/function</strong></a>.</p>
+<p>The example service for the above guide can be found in <a href="https://github.com/micro/examples/tree/master/service"><strong>examples/service</strong></a>.</p>
 
-<p>The <a href="https://github.com/micro/examples"><strong>examples</strong></a> directory contains examples for using things such as middleware/wrappers, selector filters, pub/sub, grpc, plugins and much more. For the complete greeter example look at <a href="https://github.com/micro/examples/tree/master/greeter"><strong>examples/greeter</strong></a>. Other examples can be found throughout the GitHub repository.</p>
-
-<p>Watch the <a href="https://www.youtube.com/watch?v=xspaDovwk34">Golang UK Conf 2016</a> video for a high level overview.</p>
+<p>Further examples exist in the <a href="https://github.com/micro/examples"><strong>examples</strong></a> directory for using things such as middleware/wrappers, 
+selector filters, pub/sub, grpc, plugins and much more. For the complete greeter example look at 
+<a href="https://github.com/micro/examples/tree/master/greeter"><strong>examples/greeter</strong></a>.</p>
 
 
 
@@ -898,7 +966,7 @@ Anything which implements this interface can be used as a registry. The same app
             <div class="row">
                 <div class="col-lg-12 footer">
                &copy; 2019 Micro Services, Inc.<br />
- Last generated: Nov 13, 2019 <br />
+ Last generated: Nov 14, 2019 <br />
                 </div>
             </div>
 </footer>

@@ -359,8 +359,8 @@
 
 {
 "title": "Go Micro",
-"tags": "go-micro",
-"keywords": "go-micro",
+"tags": "go-microframework",
+"keywords": "go-micro, framework",
 "url": "go-micro.html",
 "summary": "Go Micro is a framework for microservices development"
 }
@@ -462,6 +462,17 @@
 "keywords": "install",
 "url": "installation.html",
 "summary": ""
+}
+,
+
+
+
+{
+"title": "Local Development",
+"tags": "microruntimedev",
+"keywords": "runtime",
+"url": "local-development.html",
+"summary": "Run a service with the micro runtime"
 }
 ,
 
@@ -682,6 +693,17 @@
 "keywords": "roadmap",
 "url": "roadmap.html",
 "summary": ""
+}
+,
+
+
+
+{
+"title": "Run Service",
+"tags": "microruntime",
+"keywords": "runtime",
+"url": "run-service.html",
+"summary": "Run a service with the micro runtime"
 }
 ,
 
