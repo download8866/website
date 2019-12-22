@@ -1,8 +1,8 @@
-# Website
+# 网站
 
 Nothing to see here, just the static files that serve micro.mu
 
-## Usage
+## 用法
 
 - Generate the docs
 - Generate the blog
